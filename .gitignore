@@ -1,0 +1,24 @@
+# Entorno virtual
+venv/
+__pycache__/
+*.pyc
+
+# Credenciales y variables de entorno (NUNCA subir esto)
+.env
+.streamlit/secrets.toml
+
+# Bases de datos locales de prueba
+*.db
+*.sqlite3
+
+# Datasets e imágenes pesadas (usar almacenamiento aparte, no Git)
+data/
+datasets/
+runs/
+
+# Modelos entrenados (pesados; considerar Git LFS si se necesitan versionar)
+*.pt
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db

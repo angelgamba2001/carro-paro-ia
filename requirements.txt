@@ -1,0 +1,9 @@
+ultralytics
+easyocr
+streamlit
+mysql-connector-python
+opencv-python-headless
+python-dotenv
+bcrypt
+pandas
+Pillow
