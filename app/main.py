@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from datetime import datetime
 import sys
 import os
@@ -11,13 +12,35 @@ from src.database.connection import obtener_conexion
 st.set_page_config(page_title="Carro de Paro IA", layout="wide")
 
 st.title("🚑 Control e Inventario de Medicamentos - Carro de Paro")
+
+# --- BLOQUE 1: MÉTRICAS Y DASHBOARD EN TIEMPO REAL ---
+conn = obtener_conexion()
+if conn:
+    query_kpi = """
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN estado = 'vigente' THEN 1 ELSE 0 END) as vigentes,
+            SUM(CASE WHEN estado = 'proximo_a_vencer' THEN 1 ELSE 0 END) as proximos,
+            SUM(CASE WHEN estado = 'vencido' THEN 1 ELSE 0 END) as vencidos
+        FROM inventario_carro;
+    """
+    df_kpi = pd.read_sql(query_kpi, conn)
+    conn.close()
+    
+    col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+    col_kpi1.metric("Total Medicamentos", df_kpi['total'][0] if not df_kpi.empty else 0)
+    col_kpi2.metric("🟢 Vigentes", df_kpi['vigentes'][0] if not df_kpi.empty else 0)
+    col_kpi3.metric("🟡 Próximos a Vencer", df_kpi['proximos'][0] if not df_kpi.empty else 0)
+    col_kpi4.metric("🔴 Vencidos", df_kpi['vencidos'][0] if not df_kpi.empty else 0)
+
+st.write("---")
+
+# --- BLOQUE 2: FORMULARIO DE REGISTRO MANIFESTADO ---
 st.subheader("Fase 1: Registro Asistido e Ingreso por Lotes")
 
-# Formulario de Ingreso Manual
 with st.form("form_registro"):
     st.write("### Registrar Nuevo Medicamento / Lote")
     
-    # 1. Conexión para obtener el catálogo existente
     conn = obtener_conexion()
     opciones_cat = []
     if conn:
@@ -27,7 +50,6 @@ with st.form("form_registro"):
         cursor.close()
         conn.close()
     
-    # Opciones para el desplegable inteligente
     nombres_medicamentos = [f"{m['id']} - {m['nombre']} (Criticidad: {m['criticidad']})" for m in opciones_cat]
     
     col1, col2 = st.columns(2)
@@ -52,45 +74,50 @@ if btn_guardar:
     elif not lote:
         st.warning("Por favor ingrese el número de lote.")
     else:
-        # Extraer ID del medicamento seleccionado
         med_id = int(medicamento_seleccionado.split(" - ")[0])
         
-        # Guardar registros masivos en la BD
         conn = obtener_conexion()
         if conn:
             cursor = conn.cursor()
-            query = """
+            query_inv = """
                 INSERT INTO inventario_carro 
                 (medicamento_id, usuario_id, lote, fecha_vencimiento, estado, editado_manual)
                 VALUES (%s, %s, %s, %s, %s, 1);
             """
             
-            # Determinar estado inicial
             dias_para_vencer = (fecha_vencimiento - datetime.now().date()).days
             estado = "vigente"
+            tipo_alerta = None
+            
             if dias_para_vencer <= 0:
                 estado = "vencido"
+                tipo_alerta = "VENCIDO"
             elif dias_para_vencer <= 30:
                 estado = "proximo_a_vencer"
+                tipo_alerta = "PROXIMO_VENCER"
             
-            # Inserción por lote (repetir por N cantidad)
             for _ in range(cantidad):
-                cursor.execute(query, (med_id, usuario_id, lote, fecha_vencimiento, estado))
+                cursor.execute(query_inv, (med_id, usuario_id, lote, fecha_vencimiento, estado))
+                inv_id = cursor.lastrowid
+                
+                # Generar alerta automática si aplica
+                if tipo_alerta:
+                    query_alerta = "INSERT INTO alertas (medicamento_id, tipo) VALUES (%s, %s);"
+                    cursor.execute(query_alerta, (inv_id, tipo_alerta))
             
             conn.commit()
             cursor.close()
             conn.close()
             
             st.success(f"¡Se registraron correctamente {cantidad} unidades del lote {lote}!")
+            st.rerun()
 
-
-# --- TABLA VISUAL DE INVENTARIO EN TIEMPO REAL ---
+# --- BLOQUE 3: TABLA VISUAL DE INVENTARIO ---
 st.write("---")
 st.write("### 📊 Inventario Actual en el Carro de Paro")
 
 conn = obtener_conexion()
 if conn:
-    import pandas as pd
     query_vista = """
         SELECT 
             i.id AS 'ID Registro',
