@@ -12,6 +12,12 @@ from src.database.auditoria import registrar_log
 
 st.set_page_config(page_title="Carro de Paro IA", layout="wide")
 
+
+
+# Mostrar mensaje de éxito persistente si existe
+if "mensaje_exito" in st.session_state:
+    st.success(st.session_state["mensaje_exito"])
+    del st.session_state["mensaje_exito"]  # Limpiar para que no vuelva a salir
 # --- CONTROL DE SESIÓN Y LOGIN ---
 if "usuario" not in st.session_state:
     st.session_state["usuario"] = None
@@ -217,41 +223,82 @@ with tabs[1]:
 # PESTAÑA 3: GESTIÓN DE USUARIOS (SOLO ADMIN)
 # ==========================================
 # ==========================================
-# PESTAÑA 3: GESTIÓN DE USUARIOS (SOLO ADMIN)
+# ==========================================
+# PESTAÑA: ADMINISTRACIÓN DEL SISTEMA (SOLO ADMIN)
 # ==========================================
 if user_actual['rol'] == 'ADMINISTRADOR':
     with tabs[2]:
-        st.subheader("👤 Crear Nuevo Usuario del Sistema")
-        with st.form("form_crear_usuario"):
-            u_nombre = st.text_input("Nombre Completo:")
-            u_correo = st.text_input("Correo Electrónico:")
-            u_pass = st.text_input("Contraseña:", type="password")
-            u_rol = st.selectbox("Rol Asignado:", options=["ENFERMERO", "AUDITOR", "ADMINISTRADOR"])
-            btn_crear_u = st.form_submit_button("Crear Usuario")
-            
-        if btn_crear_u:
-            if u_nombre and u_correo and u_pass:
-                pass_h = hash_password(u_pass)
-                conn = obtener_conexion()
-                if conn:
-                    try:
-                        cursor = conn.cursor()
-                        query_u = "INSERT INTO usuarios (nombre, correo, password_hash, rol, activo) VALUES (%s, %s, %s, %s, 1);"
-                        cursor.execute(query_u, (u_nombre, u_correo, pass_h, u_rol))
-                        new_u_id = cursor.lastrowid
-                        conn.commit()
-                        cursor.close()
-                        conn.close()
-                        
-                        registrar_log(user_actual['id'], "CREACION_USUARIO", "usuarios", new_u_id, f"Se creó el usuario {u_nombre} con rol {u_rol}")
-                        st.success(f"¡Usuario '{u_nombre}' creado exitosamente!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al crear usuario (verifique si el correo ya existe): {e}")
-            else:
-                st.warning("Por favor complete todos los campos del usuario.")
+        col_admin1, col_admin2 = st.columns(2)
 
-        # --- SECCIÓN: ACTIVAR / DESACTIVAR USUARIOS ---
+        # --- SECCIÓN 1: AGREGAR AL CATÁLOGO MAESTRO ---
+        with col_admin1:
+            st.subheader("💊 Agregar Medicamento al Catálogo")
+            with st.form("form_cat_med"):
+                c_nombre = st.text_input("Nombre y Concentración:", placeholder="Ej: Dopamina 200mg/5ml")
+                c_desc = st.text_area("Descripción / Indicación:", placeholder="Ampolla para soporte inotrópico")
+                c_criticidad = st.selectbox("Nivel de Criticidad:", options=["ALTA", "MEDIA", "BAJA"])
+                btn_crear_cat = st.form_submit_button("Guardar en Catálogo")
+
+            if btn_crear_cat:
+                if c_nombre:
+                    conn = obtener_conexion()
+                    if conn:
+                        try:
+                            cursor = conn.cursor()
+                            query_c = "INSERT INTO cat_medicamentos (nombre, descripcion, criticidad) VALUES (%s, %s, %s);"
+                            cursor.execute(query_c, (c_nombre, c_desc, c_criticidad))
+                            new_cat_id = cursor.lastrowid
+                            conn.commit()
+                            cursor.close()
+                            conn.close()
+
+                            # 1. Registrar evento en log de auditoría
+                            registrar_log(user_actual['id'], "INSERCION", "cat_medicamentos", new_cat_id, f"Nuevo medicamento en catálogo: {c_nombre}")
+                            
+                            # 2. Guardar mensaje para mostrarlo tras el refresco de página
+                            st.session_state["mensaje_exito"] = f"¡Medicamento '{c_nombre}' agregado al catálogo exitosamente!"
+                            st.rerun()
+                        except Exception as e:
+                            if "1062" in str(e):
+                                st.warning(f"⚠️ El medicamento '{c_nombre}' ya se encuentra registrado en el catálogo.")
+                            else:
+                                st.error(f"Error al guardar en el catálogo: {e}")
+                else:
+                    st.warning("Ingrese el nombre del medicamento.")
+
+        # --- SECCIÓN 2: CREAR USUARIO ---
+        with col_admin2:
+            st.subheader("👤 Crear Nuevo Usuario del Sistema")
+            with st.form("form_crear_usuario"):
+                u_nombre = st.text_input("Nombre Completo:")
+                u_correo = st.text_input("Correo Electrónico:")
+                u_pass = st.text_input("Contraseña:", type="password")
+                u_rol = st.selectbox("Rol Asignado:", options=["ENFERMERO", "AUDITOR", "ADMINISTRADOR"])
+                btn_crear_u = st.form_submit_button("Crear Usuario")
+
+            if btn_crear_u:
+                if u_nombre and u_correo and u_pass:
+                    pass_h = hash_password(u_pass)
+                    conn = obtener_conexion()
+                    if conn:
+                        try:
+                            cursor = conn.cursor()
+                            query_u = "INSERT INTO usuarios (nombre, correo, password_hash, rol, activo) VALUES (%s, %s, %s, %s, 1);"
+                            cursor.execute(query_u, (u_nombre, u_correo, pass_h, u_rol))
+                            new_u_id = cursor.lastrowid
+                            conn.commit()
+                            cursor.close()
+                            conn.close()
+
+                            registrar_log(user_actual['id'], "CREACION_USUARIO", "usuarios", new_u_id, f"Se creó el usuario {u_nombre} con rol {u_rol}")
+                            st.success(f"¡Usuario '{u_nombre}' creado exitosamente!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al crear usuario: {e}")
+                else:
+                    st.warning("Complete todos los campos del usuario.")
+
+        # --- SECCIÓN 3: ACTIVAR / DESACTIVAR USUARIOS ---
         st.write("---")
         st.subheader("🔄 Activar / Desactivar Usuarios del Sistema")
 
@@ -294,3 +341,4 @@ if user_actual['rol'] == 'ADMINISTRADOR':
                         )
                         st.success(f"Estado del usuario ID {u_select_id} actualizado correctamente.")
                         st.rerun()
+                    
