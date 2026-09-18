@@ -3,7 +3,7 @@ from src.database.connection import obtener_conexion
 def registrar_log(usuario_id: int, accion: str, entidad: str, entidad_id: int = None, detalle: str = None):
     """
     Inserta un evento en la tabla log_auditoria.
-    Acciones válidas: INSERCION, ACTUALIZACION, ELIMINACION, LECTURA_OCR, CONSULTA_AGENTE
+    Acciones: INSERCION, ACTUALIZACION, ELIMINACION, CREACION_USUARIO, LECTURA_OCR
     """
     conn = obtener_conexion()
     if conn:
@@ -17,6 +17,6 @@ def registrar_log(usuario_id: int, accion: str, entidad: str, entidad_id: int = 
             conn.commit()
             cursor.close()
         except Exception as e:
-            print(f"Error al registrar log de auditoria: {e}")
+            print(f"Error al registrar log de auditoría: {e}")
         finally:
             conn.close()
