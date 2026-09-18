@@ -9,15 +9,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.database.connection import obtener_conexion
 from src.database.auth import verificar_credenciales, hash_password
 from src.database.auditoria import registrar_log
+from src.utils.exportador import generar_csv
 
 st.set_page_config(page_title="Carro de Paro IA", layout="wide")
 
-
-
-# Mostrar mensaje de éxito persistente si existe
-if "mensaje_exito" in st.session_state:
-    st.success(st.session_state["mensaje_exito"])
-    del st.session_state["mensaje_exito"]  # Limpiar para que no vuelva a salir
 # --- CONTROL DE SESIÓN Y LOGIN ---
 if "usuario" not in st.session_state:
     st.session_state["usuario"] = None
@@ -49,6 +44,11 @@ if st.sidebar.button("Cerrar Sesión"):
 
 st.title("🚑 Control e Inventario de Medicamentos - Carro de Paro")
 
+# Mensaje de éxito persistente
+if "mensaje_exito" in st.session_state:
+    st.success(st.session_state["mensaje_exito"])
+    del st.session_state["mensaje_exito"]
+
 # --- BLOQUE 1: KPIs ---
 conn = obtener_conexion()
 if conn:
@@ -71,15 +71,15 @@ if conn:
 
 st.write("---")
 
-# --- PESTAÑAS PRINCIPALES DEL SISTEMA ---
-pestanias = ["📊 Inventario y Gestión", "📜 Log de Auditoría"]
+# --- PESTAÑAS DEL SISTEMA ---
+pestanias = ["📊 Inventario y Gestión", "⚠️ Alertas Preventivas", "📜 Log de Auditoría"]
 if user_actual['rol'] == 'ADMINISTRADOR':
-    pestanias.append("👥 Gestión de Usuarios")
+    pestanias.append("⚙️ Administración del Sistema")
 
 tabs = st.tabs(pestanias)
 
 # ==========================================
-# PESTAÑA 1: INVENTARIO Y GESTIÓN (CRUD)
+# PESTAÑA 1: INVENTARIO Y EXPORTACIÓN
 # ==========================================
 with tabs[0]:
     if user_actual['rol'] in ['ENFERMERO', 'ADMINISTRADOR']:
@@ -132,7 +132,7 @@ with tabs[0]:
                 conn.close()
                 
                 registrar_log(user_actual['id'], "INSERCION", "inventario_carro", ult_ids[0], f"Ingreso masivo de {cantidad} unidades del lote {lote}")
-                st.success(f"¡Se registraron {cantidad} unidades correctamente!")
+                st.session_state["mensaje_exito"] = f"¡Se registraron {cantidad} unidades correctamente!"
                 st.rerun()
 
     st.write("### 📦 Lista de Inventario Actual")
@@ -150,57 +150,109 @@ with tabs[0]:
         conn.close()
         st.dataframe(df_inv, use_container_width=True)
 
-    # --- EDICIÓN / ELIMINACIÓN CONTROLADA ---
+        # Botón para exportar el Inventario a CSV
+        st.download_button(
+            label="📥 Descargar Reporte de Inventario (CSV)",
+            data=generar_csv(df_inv),
+            file_name=f"reporte_inventario_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+
+    # --- EDICIÓN / ELIMINACIÓN ---
     if user_actual['rol'] in ['ENFERMERO', 'ADMINISTRADOR']:
         st.write("---")
-        st.subheader("🛠️ Modificar o Eliminar Registro de Inventario")
+        st.subheader("🛠️ Modificar o Eliminar Registro")
         col_edit1, col_edit2 = st.columns(2)
         
         with col_edit1:
-            st.write("#### ✏️ Editar Registro (Fecha Protegida)")
-            id_mod = st.number_input("Ingrese el ID del Registro a Modificar:", min_value=1, step=1)
-            nuevo_lote = st.text_input("Nuevo Número de Lote:", placeholder="Dejar vacío si no cambia")
-            st.warning("🔒 La fecha de vencimiento NO se puede modificar por normatividad de seguridad médica.")
-            btn_modificar = st.button("Actualizar Lote")
-            
-            if btn_modificar:
-                if nuevo_lote.strip():
-                    conn = obtener_conexion()
-                    if conn:
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE inventario_carro SET lote = %s WHERE id = %s;", (nuevo_lote, id_mod))
-                        conn.commit()
-                        cursor.close()
-                        conn.close()
-                        registrar_log(user_actual['id'], "ACTUALIZACION", "inventario_carro", id_mod, f"Se actualizó el lote a: {nuevo_lote}")
-                        st.success(f"Registro ID {id_mod} actualizado.")
-                        st.rerun()
-                else:
-                    st.error("Ingrese el nuevo lote para actualizar.")
-
-        with col_edit2:
-            st.write("#### 🗑️ Eliminar Registro Erróneo")
-            id_del = st.number_input("Ingrese el ID del Registro a Eliminar:", min_value=1, step=1, key="del_id")
-            btn_eliminar = st.button("Eliminar Registro", type="primary")
-            
-            if btn_eliminar:
+            st.write("#### ✏️ Editar Lote (Fecha Protegida)")
+            id_mod = st.number_input("ID del Registro:", min_value=1, step=1)
+            nuevo_lote = st.text_input("Nuevo Lote:")
+            st.warning("🔒 La fecha de vencimiento es inmutable por seguridad.")
+            if st.button("Actualizar Lote") and nuevo_lote.strip():
                 conn = obtener_conexion()
                 if conn:
                     cursor = conn.cursor()
-                    # Eliminar alertas asociadas primero para mantener integridad referencial
+                    cursor.execute("UPDATE inventario_carro SET lote = %s WHERE id = %s;", (nuevo_lote, id_mod))
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    registrar_log(user_actual['id'], "ACTUALIZACION", "inventario_carro", id_mod, f"Lote actualizado a: {nuevo_lote}")
+                    st.session_state["mensaje_exito"] = f"Registro ID {id_mod} actualizado."
+                    st.rerun()
+
+        with col_edit2:
+            st.write("#### 🗑️ Eliminar Registro")
+            id_del = st.number_input("ID del Registro a Eliminar:", min_value=1, step=1, key="del_id")
+            if st.button("Eliminar Registro", type="primary"):
+                conn = obtener_conexion()
+                if conn:
+                    cursor = conn.cursor()
                     cursor.execute("DELETE FROM alertas WHERE medicamento_id = %s;", (id_del,))
                     cursor.execute("DELETE FROM inventario_carro WHERE id = %s;", (id_del,))
                     conn.commit()
                     cursor.close()
                     conn.close()
-                    registrar_log(user_actual['id'], "ELIMINACION", "inventario_carro", id_del, f"Se eliminó el registro ID {id_del}")
-                    st.success(f"Registro ID {id_del} eliminado del inventario.")
+                    registrar_log(user_actual['id'], "ELIMINACION", "inventario_carro", id_del, f"Registro ID {id_del} eliminado")
+                    st.session_state["mensaje_exito"] = f"Registro ID {id_del} eliminado."
                     st.rerun()
 
 # ==========================================
-# PESTAÑA 2: LOG DE AUDITORÍA (TRAZABILIDAD)
+# PESTAÑA 2: ALERTAS PREVENTIVAS VISUALES
 # ==========================================
 with tabs[1]:
+    st.subheader("🚨 Panel de Alertas Preventivas y Notificaciones")
+    conn = obtener_conexion()
+    if conn:
+        query_alertas = """
+            SELECT a.id AS 'ID Alerta', c.nombre AS 'Medicamento', i.lote AS 'Lote', 
+                   i.fecha_vencimiento AS 'Fecha Vencimiento', a.tipo AS 'Tipo Alerta', 
+                   a.resuelta AS 'Resuelta', a.fecha_creacion AS 'Fecha Detección'
+            FROM alertas a
+            JOIN inventario_carro i ON a.medicamento_id = i.id
+            JOIN cat_medicamentos c ON i.medicamento_id = c.id
+            ORDER BY a.resuelta ASC, i.fecha_vencimiento ASC;
+        """
+        df_alertas = pd.read_sql(query_alertas, conn)
+        conn.close()
+
+        if not df_alertas.empty:
+            df_alertas['Estado Alerta'] = df_alertas['Resuelta'].apply(lambda x: "✅ Resuelta" if x == 1 else "🔴 Pendiente")
+            st.dataframe(df_alertas[['ID Alerta', 'Medicamento', 'Lote', 'Fecha Vencimiento', 'Tipo Alerta', 'Estado Alerta', 'Fecha Detección']], use_container_width=True)
+            
+            # Exportar Alertas
+            st.download_button(
+                label="📥 Exportar Alertas a CSV",
+                data=generar_csv(df_alertas),
+                file_name=f"reporte_alertas_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+
+            # Acción: Marcar Alerta como Resuelta
+            if user_actual['rol'] in ['ENFERMERO', 'ADMINISTRADOR']:
+                st.write("---")
+                col_al1, col_al2 = st.columns(2)
+                with col_al1:
+                    al_id = st.number_input("ID de Alerta a gestionar:", min_value=1, step=1)
+                with col_al2:
+                    if st.button("Marcar Alerta como Resuelta"):
+                        conn = obtener_conexion()
+                        if conn:
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE alertas SET resuelta = 1 WHERE id = %s;", (al_id,))
+                            conn.commit()
+                            cursor.close()
+                            conn.close()
+                            registrar_log(user_actual['id'], "ACTUALIZACION", "alertas", al_id, "Alerta marcada como resuelta")
+                            st.session_state["mensaje_exito"] = f"Alerta ID {al_id} marcada como resuelta."
+                            st.rerun()
+        else:
+            st.info("🟢 No hay alertas pendientes en este momento.")
+
+# ==========================================
+# PESTAÑA 3: LOG DE AUDITORÍA (TRAZABILIDAD)
+# ==========================================
+with tabs[2]:
     if user_actual['rol'] in ['AUDITOR', 'ADMINISTRADOR']:
         st.subheader("📜 Auditoría y Registro de Eventos del Sistema")
         conn = obtener_conexion()
@@ -216,21 +268,24 @@ with tabs[1]:
             df_audit = pd.read_sql(query_audit, conn)
             conn.close()
             st.dataframe(df_audit, use_container_width=True)
+            
+            # Exportar Auditoría
+            st.download_button(
+                label="📥 Exportar Logs de Auditoría (CSV)",
+                data=generar_csv(df_audit),
+                file_name=f"log_auditoria_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
     else:
         st.warning("⚠️ Su rol de usuario no tiene permisos para consultar los logs de auditoría.")
 
 # ==========================================
-# PESTAÑA 3: GESTIÓN DE USUARIOS (SOLO ADMIN)
-# ==========================================
-# ==========================================
-# ==========================================
-# PESTAÑA: ADMINISTRACIÓN DEL SISTEMA (SOLO ADMIN)
+# PESTAÑA 4: ADMINISTRACIÓN DEL SISTEMA
 # ==========================================
 if user_actual['rol'] == 'ADMINISTRADOR':
-    with tabs[2]:
+    with tabs[3]:
         col_admin1, col_admin2 = st.columns(2)
 
-        # --- SECCIÓN 1: AGREGAR AL CATÁLOGO MAESTRO ---
         with col_admin1:
             st.subheader("💊 Agregar Medicamento al Catálogo")
             with st.form("form_cat_med"):
@@ -252,11 +307,8 @@ if user_actual['rol'] == 'ADMINISTRADOR':
                             cursor.close()
                             conn.close()
 
-                            # 1. Registrar evento en log de auditoría
                             registrar_log(user_actual['id'], "INSERCION", "cat_medicamentos", new_cat_id, f"Nuevo medicamento en catálogo: {c_nombre}")
-                            
-                            # 2. Guardar mensaje para mostrarlo tras el refresco de página
-                            st.session_state["mensaje_exito"] = f"¡Medicamento '{c_nombre}' agregado al catálogo exitosamente!"
+                            st.session_state["mensaje_exito"] = f"¡Medicamento '{c_nombre}' agregado al catálogo!"
                             st.rerun()
                         except Exception as e:
                             if "1062" in str(e):
@@ -266,7 +318,6 @@ if user_actual['rol'] == 'ADMINISTRADOR':
                 else:
                     st.warning("Ingrese el nombre del medicamento.")
 
-        # --- SECCIÓN 2: CREAR USUARIO ---
         with col_admin2:
             st.subheader("👤 Crear Nuevo Usuario del Sistema")
             with st.form("form_crear_usuario"):
@@ -291,14 +342,13 @@ if user_actual['rol'] == 'ADMINISTRADOR':
                             conn.close()
 
                             registrar_log(user_actual['id'], "CREACION_USUARIO", "usuarios", new_u_id, f"Se creó el usuario {u_nombre} con rol {u_rol}")
-                            st.success(f"¡Usuario '{u_nombre}' creado exitosamente!")
+                            st.session_state["mensaje_exito"] = f"¡Usuario '{u_nombre}' creado exitosamente!"
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al crear usuario: {e}")
                 else:
                     st.warning("Complete todos los campos del usuario.")
 
-        # --- SECCIÓN 3: ACTIVAR / DESACTIVAR USUARIOS ---
         st.write("---")
         st.subheader("🔄 Activar / Desactivar Usuarios del Sistema")
 
@@ -332,13 +382,6 @@ if user_actual['rol'] == 'ADMINISTRADOR':
                         cursor.close()
                         conn.close()
 
-                        registrar_log(
-                            user_actual['id'], 
-                            "ACTUALIZACION", 
-                            "usuarios", 
-                            u_select_id, 
-                            f"Cambio de estado a {'ACTIVO' if val_activo == 1 else 'INACTIVO'}"
-                        )
-                        st.success(f"Estado del usuario ID {u_select_id} actualizado correctamente.")
+                        registrar_log(user_actual['id'], "ACTUALIZACION", "usuarios", u_select_id, f"Cambio de estado a {'ACTIVO' if val_activo == 1 else 'INACTIVO'}")
+                        st.session_state["mensaje_exito"] = f"Estado del usuario ID {u_select_id} actualizado."
                         st.rerun()
-                    
