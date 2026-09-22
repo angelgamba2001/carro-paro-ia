@@ -1,26 +1,57 @@
+"""
+Extracción de fecha de vencimiento y lote desde el texto leído por OCR.
+
+Corrige un defecto de la v1: el patrón MM/AAAA se evaluaba antes que la fecha completa,
+por lo que '12/05/2027' se interpretaba como diciembre de 2005.
+"""
 import re
+from datetime import date
 
-def extraer_fecha_texto(texto: str):
-    """
-    Busca patrones de fechas en un texto detectado y las convierte
-    al formato estándar de MySQL (YYYY-MM-DD).
-    """
-    patron_mes_anio = r'\b(0[1-9]|1[0-2])[/-](20\d{2}|\d{2})\b'
-    patron_completo = r'\b(\d{2,4})[/-](\d{2})[/-](\d{2,4})\b'
+MESES = {"ENE": 1, "JAN": 1, "FEB": 2, "MAR": 3, "ABR": 4, "APR": 4, "MAY": 5, "JUN": 6, "JUL": 7,
+         "AGO": 8, "AUG": 8, "SEP": 9, "SET": 9, "OCT": 10, "NOV": 11, "DIC": 12, "DEC": 12}
 
-    match_mes_anio = re.search(patron_mes_anio, texto)
-    if match_mes_anio:
-        mes, anio = match_mes_anio.groups()
-        if len(anio) == 2:
-            anio = f"20{anio}"
-        return f"{anio}-{mes}-01"
+_CLAVE_VENC = r"(?:EXP|VENC|VTO|VEN|CAD|FV|F\.?\s?V\.?)"
 
-    match_completo = re.search(patron_completo, texto)
-    if match_completo:
-        p1, p2, p3 = match_completo.groups()
-        if len(p1) == 4:
-            return f"{p1}-{p2}-{p3}"
-        elif len(p3) == 4:
-            return f"{p3}-{p2}-{p1}"
 
-    
+def _valida(anio: int, mes: int, dia: int = 1) -> str | None:
+    if anio < 100:
+        anio += 2000
+    try:
+        return date(anio, mes, dia).isoformat()
+    except ValueError:
+        return None
+
+
+def extraer_fecha_texto(texto: str) -> str | None:
+    """Devuelve la fecha en formato YYYY-MM-DD (MySQL) o None. Si solo hay mes/año, usa el día 1."""
+    if not texto:
+        return None
+    t = texto.upper().replace("\n", " ")
+    # Prioriza lo que sigue a una palabra clave de vencimiento (evita tomar la fecha de fabricación)
+    m = re.search(_CLAVE_VENC + r"[\s.:]*([0-9A-Z/.\- ]{4,14})", t)
+    candidatos = [m.group(1)] if m else []
+    candidatos.append(t)
+    for c in candidatos:
+        # 1) fecha completa AAAA-MM-DD o DD/MM/AAAA
+        f = re.search(r"\b(20\d{2})[/\-.](0?[1-9]|1[0-2])[/\-.](0?[1-9]|[12]\d|3[01])\b", c)
+        if f and (r := _valida(int(f[1]), int(f[2]), int(f[3]))):
+            return r
+        f = re.search(r"\b(0?[1-9]|[12]\d|3[01])[/\-.](0?[1-9]|1[0-2])[/\-.](20\d{2}|\d{2})\b", c)
+        if f and (r := _valida(int(f[3]), int(f[2]), int(f[1]))):
+            return r
+        # 2) mes/año numérico MM/AAAA o MM/AA
+        f = re.search(r"\b(0?[1-9]|1[0-2])[/\-.](20\d{2}|\d{2})\b", c)
+        if f and (r := _valida(int(f[2]), int(f[1]))):
+            return r
+        # 3) mes en texto: NOV 2027, NOV-27
+        f = re.search(r"\b(" + "|".join(MESES) + r")[\s/\-.]*(20\d{2}|\d{2})\b", c)
+        if f and (r := _valida(int(f[2]), MESES[f[1]])):
+            return r
+    return None
+
+
+def extraer_lote(texto: str) -> str | None:
+    if not texto:
+        return None
+    m = re.search(r"\b(?:LOTE|LOT|LT|L)[\s.:#]*([A-Z0-9\-]{3,20})", texto.upper())
+    return m.group(1) if m else None

@@ -1,24 +1,26 @@
 # Entorno virtual
 venv/
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
-# Credenciales y variables de entorno (NUNCA subir esto)
+# Credenciales (NUNCA subir)
 .env
 .streamlit/secrets.toml
 
-# Bases de datos locales de prueba
-*.db
-*.sqlite3
-
-# Datasets e imágenes pesadas (usar almacenamiento aparte, no Git)
-data/
+# Data lake: se regenera con los scripts. Solo se versiona la referencia.
+data/*
+!data/referencia/
 datasets/
 runs/
+spark-warehouse/
+metastore_db/
+derby.log
 
-# Modelos entrenados (pesados; considerar Git LFS si se necesitan versionar)
+# Modelos pesados
 *.pt
 
-# Archivos del sistema operativo
+# Sistema operativo
 .DS_Store
 Thumbs.db

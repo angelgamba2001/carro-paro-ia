@@ -1,35 +1,36 @@
-import os
-from src.database.connection import obtener_conexion
+"""
+Demostración rápida por consola de los componentes del proyecto (para la sustentación).
+Requiere haber ejecutado: inicializar_bd.py, generar_historico.py y ejecutar_pipeline.py
+"""
+from src.agente.agente import AgenteCarroParo
+from src.analitica.kpis import kpis_analiticos, kpis_operativos
+from src.analitica.prediccion import leer_metricas
+from src.bigdata.procesamiento import ultima_ejecucion
+from src.database.connection import consultar
 from src.ocr.extractor_fechas import extraer_fecha_texto
+from src.seguridad.autenticacion import autenticar
 
-def probar_avance_proyecto():
-    print("=" * 60)
-    print("DEMOSTRACIÓN DE AVANCE - PROYECTO TESIS CARRO DE PARO")
-    print("=" * 60)
-    
-    # 1. Probar Conexión a Base de Datos MySQL
-    conexion = obtener_conexion()
-    if conexion:
-        cursor = conexion.cursor()
-        cursor.execute("SHOW TABLES;")
-        tablas = cursor.fetchall()
-        print("\n[✔] Conexión a la BD MySQL (carro_paro_db): EXITOSA")
-        print("Tablas encontradas en la BD:")
-        for t in tablas:
-            print(f" - {t[0]}")
-        cursor.close()
-        conexion.close()
-    else:
-        print("\n[✖] Error conectando a la base de datos.")
+L = "=" * 70
+print(L, "\nSMARTDATA 360 · CARRO DE PARO — DEMOSTRACIÓN\n", L, sep="")
 
-    # 2. Probar Motor de Extracción con Regex (Simulación OCR)
-    texto_ejemplo_ampolla = "LOT: B8942 EXP: 11/2027 ADRENALINA 1MG/ML"
-    fecha_extraida = extraer_fecha_texto(texto_ejemplo_ampolla)
-    
-    print("\n[✔] Módulo OCR y Regex para Fechas: FUNCIONAL")
-    print(f"Texto simulado de ampolla: '{texto_ejemplo_ampolla}'")
-    print(f"Fecha estandarizada para MySQL: {fecha_extraida}")
-    print("=" * 60)
+tablas = consultar("SELECT table_name AS t, table_rows AS n FROM information_schema.tables "
+                   "WHERE table_schema = DATABASE() ORDER BY table_name")
+print("\n[1] Base de datos:", ", ".join(f"{x['t']}({x['n']})" for x in tablas))
 
-if __name__ == "__main__":
-    probar_avance_proyecto()
+r = autenticar("regente@hospital.com", "Carro#Paro2026")
+print("\n[2] Seguridad: login regente ->", "OK" if r.ok else r.mensaje, "| rol:", r.usuario and r.usuario["rol"])
+
+e = ultima_ejecucion()
+print("\n[3] Big Data:", e and f"motor {e['motor']}, {sum(e['silver_filas'].values()):,} registros limpios, "
+                             f"{e['descartadas_limpieza']} descartados")
+m = leer_metricas()
+print("\n[4] Analítica: MAE modelo", m and m["mae_modelo"], "vs línea base", m and m["mae_linea_base"])
+print("    KPI operativos:", kpis_operativos())
+print("    KPI históricos:", kpis_analiticos())
+
+print("\n[5] OCR: 'LOT B8942 VENC 12/05/2027' ->", extraer_fecha_texto("LOT B8942 VENC 12/05/2027"))
+
+if r.ok:
+    res = AgenteCarroParo().responder(r.usuario, "¿Hay riesgo de desabastecimiento y qué debo reponer?")
+    print("\n[6] Agente IA (herramientas:", ", ".join(res["herramientas_usadas"]), ")\n", res["respuesta"][:800])
+print(L)
