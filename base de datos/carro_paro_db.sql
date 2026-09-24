@@ -58,7 +58,24 @@ CREATE TABLE usuarios (
     debe_cambiar_password  TINYINT      NOT NULL DEFAULT 1,
     ultimo_acceso          DATETIME     NULL,
     fecha_creacion         DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    -- Segundo factor (TOTP)
+    totp_secret            VARCHAR(64)  NULL,
+    mfa_activo             TINYINT      NOT NULL DEFAULT 0,
+    mfa_confirmado         TINYINT      NOT NULL DEFAULT 0,
+    totp_ultimo_intervalo  BIGINT       NULL,
     CONSTRAINT fk_usuarios_rol FOREIGN KEY (rol) REFERENCES roles(codigo)
+) ENGINE=InnoDB;
+
+-- Códigos de un solo uso para recuperar el acceso si se pierde el celular
+CREATE TABLE codigos_respaldo (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id     INT NOT NULL,
+    codigo_hash    VARCHAR(255) NOT NULL,
+    usado          TINYINT NOT NULL DEFAULT 0,
+    fecha_uso      DATETIME NULL,
+    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_respaldo_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    INDEX idx_respaldo_usuario (usuario_id, usado)
 ) ENGINE=InnoDB;
 
 CREATE TABLE eventos_seguridad (

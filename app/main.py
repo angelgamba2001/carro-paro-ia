@@ -17,7 +17,8 @@ from app.componentes import estilos, mensaje_pendiente  # noqa: E402
 from app.vistas import (agente, alertas, auditoria, bigdata, catalogo, inventario, ocr,  # noqa: E402
                         perfil, tablero, usuarios)
 from src.database.connection import base_disponible  # noqa: E402
-from src.seguridad.autenticacion import autenticar  # noqa: E402
+from src.seguridad.autenticacion import autenticar, completar_login_mfa  # noqa: E402
+from src.seguridad.mfa import estado_mfa  # noqa: E402
 from src.seguridad.permisos import ROLES, tiene_permiso  # noqa: E402
 from src.servicios.inventario import recalcular_estados  # noqa: E402
 
@@ -57,8 +58,9 @@ def pantalla_login():
         if entrar:
             r = autenticar(correo, password)
             if r.ok:
-                sesion.iniciar_sesion(r.usuario)
-                recalcular_estados()   # mantiene estados y alertas al día con la fecha actual
+                _ingresar(r.usuario)
+            elif r.requiere_mfa:
+                st.session_state["mfa_pendiente"] = r.usuario      # aún NO es una sesión válida
                 st.rerun()
             else:
                 st.error(r.mensaje)
@@ -66,14 +68,53 @@ def pantalla_login():
                     st.warning(f"Intentos restantes antes del bloqueo temporal: {r.intentos_restantes}")
 
 
+def _ingresar(usuario: dict):
+    sesion.iniciar_sesion(usuario)
+    recalcular_estados()   # mantiene estados y alertas al día con la fecha actual
+    st.rerun()
+
+
+def pantalla_segundo_factor(pendiente: dict):
+    _, centro, _ = st.columns([1, 1.2, 1])
+    with centro:
+        st.markdown("## 🔐 Verificación en dos pasos")
+        st.caption(f"Cuenta: {pendiente['correo']}")
+        with st.form("mfa"):
+            codigo = st.text_input("Código de 6 dígitos", max_chars=9,
+                                   help="Tomado de su aplicación de autenticación. También puede usar "
+                                        "uno de sus códigos de respaldo.")
+            verificar = st.form_submit_button("Verificar", type="primary", width="stretch")
+        if verificar:
+            r = completar_login_mfa(pendiente["id"], codigo)
+            if r.ok:
+                _ingresar(r.usuario)
+            else:
+                st.error(r.mensaje)
+                if r.intentos_restantes is not None and r.intentos_restantes <= 2:
+                    st.warning(f"Intentos restantes antes del bloqueo temporal: {r.intentos_restantes}")
+                if not r.requiere_mfa:
+                    st.session_state.pop("mfa_pendiente", None)
+        if st.button("Volver"):
+            st.session_state.pop("mfa_pendiente", None)
+            st.rerun()
+
+
 usuario = sesion.usuario_en_sesion()
 if not usuario:
-    pantalla_login()
+    if "mfa_pendiente" in st.session_state:
+        pantalla_segundo_factor(st.session_state["mfa_pendiente"])
+    else:
+        pantalla_login()
     st.stop()
 
 # Cambio obligatorio de contraseña (usuarios nuevos o restablecidos)
 if usuario.get("debe_cambiar_password"):
     perfil.mostrar(usuario, obligatorio=True)
+    st.stop()
+
+# Los roles con permisos críticos deben activar el segundo factor antes de operar
+if estado_mfa(usuario["id"])["pendiente"]:
+    perfil.mostrar(usuario, exigir_mfa=True)
     st.stop()
 
 opciones = {}

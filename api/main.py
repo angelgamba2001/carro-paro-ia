@@ -25,7 +25,7 @@ from src.analitica.kpis import kpis_analiticos, kpis_operativos  # noqa: E402
 from src.analitica.prediccion import leer_metricas  # noqa: E402
 from src.bigdata.procesamiento import leer_gold, ultima_ejecucion  # noqa: E402
 from src.database.connection import base_disponible  # noqa: E402
-from src.seguridad.autenticacion import autenticar, revalidar_usuario  # noqa: E402
+from src.seguridad.autenticacion import autenticar, completar_login_mfa, revalidar_usuario  # noqa: E402
 from src.seguridad.permisos import PermisoDenegado, exigir_permiso  # noqa: E402
 from src.seguridad.tokens import decodificar_token, emitir_token  # noqa: E402
 from src.servicios import alertas as srv_alertas  # noqa: E402
@@ -68,13 +68,19 @@ async def _500(_, exc):
     return JSONResponse(status_code=500, content={"error": "internal", "message": "Error interno."})
 
 
-def usuario_actual(cred: HTTPAuthorizationCredentials = Depends(esquema_bearer)) -> dict:
+def _datos_token(cred) -> dict:
     if not cred:
         raise HTTPException(401, "Token requerido", headers={"WWW-Authenticate": "Bearer"})
     try:
-        datos = decodificar_token(cred.credentials)
+        return decodificar_token(cred.credentials)
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Token inválido o expirado", headers={"WWW-Authenticate": "Bearer"})
+
+
+def usuario_actual(cred: HTTPAuthorizationCredentials = Depends(esquema_bearer)) -> dict:
+    datos = _datos_token(cred)
+    if datos.get("mfa") == "pendiente":
+        raise HTTPException(401, "Falta completar la verificación en dos pasos")
     u = revalidar_usuario(int(datos["sub"]))       # rol y estado vigentes en la BD
     if not u:
         raise HTTPException(401, "Usuario inactivo")
@@ -101,6 +107,10 @@ class Consumo(BaseModel):
     codigo_azul: bool = False
 
 
+class CodigoMFA(BaseModel):
+    codigo: str = Field(min_length=6, max_length=9)
+
+
 class Pregunta(BaseModel):
     pregunta: str = Field(min_length=1, max_length=1000)
 
@@ -123,6 +133,24 @@ def salud():
 @app.post("/api/auth/login", tags=["autenticación"])
 def login(datos: Login):
     r = autenticar(datos.correo, datos.password, origen="API")
+    if r.requiere_mfa:
+        # Token temporal de 5 min: solo sirve para POST /api/auth/mfa
+        return {"mfa_requerido": True, "token_temporal": emitir_token(r.usuario, mfa_pendiente=True),
+                "mensaje": r.mensaje}
+    if not r.ok:
+        raise HTTPException(401, r.mensaje)
+    return {"access_token": emitir_token(r.usuario), "token_type": "bearer", "mfa_requerido": False,
+            "usuario": {k: r.usuario[k] for k in ("id", "nombre", "rol")},
+            "debe_cambiar_password": bool(r.usuario["debe_cambiar_password"])}
+
+
+@app.post("/api/auth/mfa", tags=["autenticación"])
+def login_mfa(datos: CodigoMFA, cred: HTTPAuthorizationCredentials = Depends(esquema_bearer)):
+    """Segundo paso: se envía el token temporal del login y el código de 6 dígitos."""
+    token = _datos_token(cred)
+    if token.get("mfa") != "pendiente":
+        raise HTTPException(401, "Use el token temporal devuelto por el login")
+    r = completar_login_mfa(int(token["sub"]), datos.codigo, origen="API")
     if not r.ok:
         raise HTTPException(401, r.mensaje)
     return {"access_token": emitir_token(r.usuario), "token_type": "bearer",

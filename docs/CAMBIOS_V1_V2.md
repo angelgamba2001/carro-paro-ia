@@ -22,6 +22,12 @@ política de contraseñas, cambio obligatorio en el primer ingreso, expiración 
 inactividad, revalidación de rol/estado contra la BD en cada solicitud, JWT para la API,
 cabeceras de seguridad, registro de eventos de seguridad y de accesos denegados.
 
+## Segundo factor de autenticación (v2.1)
+TOTP compatible con Microsoft/Google Authenticator: activación con código QR, códigos de
+respaldo de un solo uso (guardados con bcrypt), bloqueo de códigos reutilizados, obligatorio
+para ADMIN, REGENTE_FARMACIA, TI y OFICIAL_SEGURIDAD, y login en dos pasos también en la API
+(token temporal de 5 minutos que no da acceso a ningún recurso).
+
 ## Nuevo
 Carros y servicios, movimientos, pipeline Big Data medallón con PySpark, analítica
 (predicción, anomalías, riesgo), API REST, agente con herramientas, dashboard operativo y

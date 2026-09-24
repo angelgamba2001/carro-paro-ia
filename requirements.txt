@@ -11,6 +11,8 @@ mysql-connector-python>=8.3
 python-dotenv>=1.0
 bcrypt>=4.1
 PyJWT>=2.8
+pyotp>=2.9            # segundo factor TOTP
+qrcode[pil]>=7.4      # código QR para activar el segundo factor
 
 # --- Datos, Big Data y analítica ---
 pandas>=2.2
