@@ -16,9 +16,13 @@ def listar_usuarios(usuario: dict) -> pd.DataFrame:
 
 def crear_usuario(usuario: dict, nombre: str, correo: str, password: str, rol: str) -> int:
     exigir_permiso(usuario, "usuarios.gestionar")
-    correo = (correo or "").strip().lower()
-    if not nombre.strip() or "@" not in correo:
-        raise ErrorNegocio("Nombre y correo válidos son obligatorios.")
+    from src.seguridad.correos import validar as validar_correo
+    if not nombre.strip():
+        raise ErrorNegocio("El nombre es obligatorio.")
+    try:
+        correo = validar_correo(correo)
+    except ValueError as e:
+        raise ErrorNegocio(str(e)) from e
     if rol not in ROLES:
         raise ErrorNegocio("Rol inválido.")
     errores = validar_politica(password)
@@ -29,6 +33,11 @@ def crear_usuario(usuario: dict, nombre: str, correo: str, password: str, rol: s
     nuevo = ejecutar("INSERT INTO usuarios (nombre, correo, password_hash, rol, debe_cambiar_password) "
                      "VALUES (%s,%s,%s,%s,1)", (nombre.strip(), correo, hash_password(password), rol))
     registrar_log(usuario["id"], "CREACION_USUARIO", "usuarios", nuevo, f"{correo} con rol {rol}")
+    try:
+        from src.servicios.avisos import cuenta_creada
+        cuenta_creada(nuevo, usuario.get("nombre", ""))
+    except Exception:                                     # noqa: BLE001
+        pass
     return nuevo
 
 

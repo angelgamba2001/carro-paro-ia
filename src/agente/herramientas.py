@@ -184,6 +184,159 @@ def recomendar_reposicion(usuario, carro: str | None = None):
             .sort_values(["carro", "criticidad"]), "costo_total": float(stock["costo_estimado"].sum())}
 
 
+@herramienta("detalle_carro", "Estado completo de un carro: qué falta, qué vence, cuánto se consumió "
+             "y qué alertas tiene abiertas.", "inventario.ver",
+             {"type": "object", "required": ["carro"],
+              "properties": {"carro": {"type": "string", "description": "Código, p. ej. CP-URG-01"}}})
+def detalle_carro(usuario, carro: str):
+    carro = (carro or "").strip().upper()
+    stock = srv_inv.stock_por_carro(usuario)
+    stock = stock[stock["carro"] == carro]
+    if stock.empty:
+        disponibles = sorted(srv_inv.stock_por_carro(usuario)["carro"].unique())
+        return {"error": f"No existe el carro {carro}.", "carros_disponibles": disponibles}
+    inv = srv_inv.listar_inventario(usuario, carro_id=int(stock["carro_id"].iloc[0]))
+    faltan = stock[stock["stock"] < stock["stock_minimo"]]
+    alertas_carro = srv_alertas.listar_alertas(usuario, solo_pendientes=True,
+                                               carro_id=int(stock["carro_id"].iloc[0]))
+    return {
+        "carro": carro,
+        "servicio": stock["servicio"].iloc[0],
+        "medicamentos_bajo_minimo": len(faltan),
+        "criticos_bajo_minimo": int((faltan["criticidad"] == "ALTA").sum()),
+        "faltantes": faltan[["medicamento", "criticidad", "stock", "stock_minimo"]],
+        "unidades_totales": int(inv["cantidad"].sum()) if not inv.empty else 0,
+        "lotes_vencidos": int((inv["estado"] == "vencido").sum()) if not inv.empty else 0,
+        "lotes_por_vencer": int((inv["estado"] == "proximo_a_vencer").sum()) if not inv.empty else 0,
+        "proximos_vencimientos": (inv[inv["dias_para_vencer"] <= 60]
+                                  [["medicamento", "lote", "cantidad", "dias_para_vencer"]]
+                                  .sort_values("dias_para_vencer").head(8) if not inv.empty else []),
+        "alertas_pendientes": len(alertas_carro),
+    }
+
+
+@herramienta("comparar_servicios", "Compara los servicios entre sí: faltantes, unidades vencidas, "
+             "consumo y combinaciones en riesgo. Útil para decidir por dónde empezar.", "inventario.ver")
+def comparar_servicios(usuario):
+    stock = srv_inv.stock_por_carro(usuario)
+    inv = srv_inv.listar_inventario(usuario)
+    pred = leer_gold("predicciones")
+    filas = []
+    for servicio, g in stock.groupby("servicio"):
+        faltan = g[g["stock"] < g["stock_minimo"]]
+        inv_s = inv[inv["servicio"] == servicio] if not inv.empty else inv
+        en_riesgo = 0
+        if not pred.empty and "servicio" in pred.columns:
+            en_riesgo = int(pred[(pred["servicio"] == servicio) &
+                                 (pred["riesgo_desabastecimiento"] == 1)].shape[0])
+        filas.append({
+            "servicio": servicio,
+            "carros": int(g["carro"].nunique()),
+            "faltantes": len(faltan),
+            "faltantes_criticos": int((faltan["criticidad"] == "ALTA").sum()),
+            "unidades_vencidas": int(inv_s[inv_s["estado"] == "vencido"]["cantidad"].sum()) if not inv_s.empty else 0,
+            "unidades_por_vencer": int(inv_s[inv_s["estado"] == "proximo_a_vencer"]["cantidad"].sum()) if not inv_s.empty else 0,
+            "combinaciones_en_riesgo": en_riesgo,
+        })
+    tabla = pd.DataFrame(filas).sort_values(["faltantes_criticos", "unidades_vencidas"], ascending=False)
+    peor = tabla.iloc[0]["servicio"] if not tabla.empty else None
+    return {"comparacion": tabla, "servicio_con_mas_problemas": peor}
+
+
+@herramienta("buscar_medicamento", "Dónde está un medicamento: existencias por carro, lotes y "
+             "vencimientos. Acepta el nombre parcial.", "inventario.ver",
+             {"type": "object", "required": ["nombre"],
+              "properties": {"nombre": {"type": "string", "description": "Nombre o parte, p. ej. adrenalina"}}})
+def buscar_medicamento(usuario, nombre: str):
+    texto = (nombre or "").strip().lower()
+    if len(texto) < 3:
+        return {"error": "Indique al menos tres letras del nombre."}
+    stock = srv_inv.stock_por_carro(usuario)
+    coincide = stock[stock["medicamento"].str.lower().str.contains(texto, regex=False)]
+    if coincide.empty:
+        return {"error": f"Ningún medicamento del catálogo coincide con '{nombre}'."}
+    nombres = sorted(coincide["medicamento"].unique())
+    inv = srv_inv.listar_inventario(usuario)
+    lotes = inv[inv["medicamento"].isin(nombres)] if not inv.empty else inv
+    return {
+        "coincidencias": nombres,
+        "existencias": coincide[["carro", "servicio", "medicamento", "stock", "stock_minimo"]]
+                       .sort_values("stock"),
+        "total_unidades": int(coincide["stock"].sum()),
+        "carros_sin_existencias": coincide[coincide["stock"] == 0]["carro"].tolist(),
+        "lotes": (lotes[["carro", "lote", "cantidad", "fecha_vencimiento", "estado"]]
+                  .sort_values("fecha_vencimiento").head(15) if not lotes.empty else []),
+    }
+
+
+@herramienta("orden_reposicion", "Pedido consolidado para farmacia: cuántas unidades de cada "
+             "medicamento hay que pedir en total y cuánto costaría.", "inventario.ver",
+             {"type": "object", "properties": {"servicio": {"type": "string"}}})
+def orden_reposicion(usuario, servicio: str | None = None):
+    stock = srv_inv.stock_por_carro(usuario)
+    if servicio:
+        stock = stock[stock["servicio"].str.lower() == servicio.strip().lower()]
+        if stock.empty:
+            return {"error": f"No hay carros en el servicio '{servicio}'."}
+    pred = leer_gold("predicciones")
+    if not pred.empty:
+        stock = stock.merge(pred[["carro", "medicamento", "demanda_estimada"]],
+                            on=["carro", "medicamento"], how="left")
+    else:
+        stock["demanda_estimada"] = 0.0
+    stock["demanda_estimada"] = stock["demanda_estimada"].fillna(0)
+    stock["faltan"] = (stock["stock_maximo"] - stock["stock"] +
+                       stock["demanda_estimada"].round()).clip(lower=0)
+    pedir = stock[stock["faltan"] > 0]
+    if pedir.empty:
+        return {"aviso": "Ningún carro necesita reposición en este momento."}
+    consolidado = (pedir.groupby(["medicamento", "criticidad"], as_index=False)
+                        .agg(unidades=("faltan", "sum"), carros=("carro", "nunique"),
+                             costo_unitario=("costo_unitario", "first")))
+    consolidado["unidades"] = consolidado["unidades"].astype(int)
+    consolidado["costo"] = consolidado["unidades"] * consolidado["costo_unitario"]
+    orden = {"ALTA": 0, "MEDIA": 1, "BAJA": 2}
+    consolidado = consolidado.assign(_o=consolidado["criticidad"].map(orden)).sort_values(
+        ["_o", "costo"], ascending=[True, False]).drop(columns="_o")
+    return {"pedido": consolidado[["medicamento", "criticidad", "unidades", "carros", "costo"]],
+            "lineas": len(consolidado),
+            "unidades_totales": int(consolidado["unidades"].sum()),
+            "costo_total": float(consolidado["costo"].sum())}
+
+
+@herramienta("historial_consumo", "Cómo ha evolucionado el consumo de un medicamento en los últimos "
+             "meses, por servicio.", "dashboard.analitico",
+             {"type": "object", "properties": {"medicamento": {"type": "string"},
+                                               "meses": {"type": "integer", "default": 12}}})
+def historial_consumo(usuario, medicamento: str | None = None, meses: int = 12):
+    df = leer_gold("consumo_mensual_servicio")
+    if df.empty:
+        return {"aviso": "Todavía no hay histórico procesado."}
+    df = df.copy()
+    df["mes"] = pd.to_datetime(df["mes"])
+    limite = df["mes"].max() - pd.DateOffset(months=int(meses))
+    df = df[df["mes"] > limite]
+    if medicamento:
+        texto = medicamento.strip().lower()
+        df = df[df["medicamento"].str.lower().str.contains(texto, regex=False)]
+        if df.empty:
+            return {"error": f"Sin consumo registrado para '{medicamento}' en el periodo."}
+    resumen = (df.groupby(df["mes"].dt.strftime("%Y-%m"), as_index=False)["unidades"].sum()
+                 .rename(columns={"mes": "periodo"}))
+    por_servicio = df.groupby("servicio", as_index=False)["unidades"].sum().sort_values(
+        "unidades", ascending=False)
+    mitad = len(resumen) // 2 or 1
+    previo = resumen["unidades"].head(mitad).mean()
+    reciente = resumen["unidades"].tail(mitad).mean()
+    tendencia = "estable"
+    if previo:
+        cambio = (reciente - previo) / previo * 100
+        tendencia = ("al alza" if cambio > 12 else "a la baja" if cambio < -12 else "estable")
+    return {"medicamento": medicamento or "todos", "meses": int(meses),
+            "por_mes": resumen, "por_servicio": por_servicio,
+            "total_unidades": int(df["unidades"].sum()), "tendencia": tendencia}
+
+
 # ---------------------------------------------------------------------------
 # Herramientas de acción (modifican datos -> permiso específico y auditoría)
 # ---------------------------------------------------------------------------
@@ -196,3 +349,18 @@ def recomendar_reposicion(usuario, carro: str | None = None):
 def crear_recomendacion(usuario, mensaje: str, severidad: str = "MEDIA"):
     alerta_id = srv_alertas.crear_alerta("RECOMENDACION_AGENTE", mensaje[:255], severidad, "AGENTE")
     return {"alerta_id": alerta_id, "creada": alerta_id is not None}
+
+
+@herramienta("atender_alerta", "Marca una alerta como atendida dejando constancia de quién lo hizo "
+             "y por qué. Pida siempre el número de alerta antes de usarla.", "alertas.gestionar",
+             {"type": "object", "required": ["alerta_id", "nota"],
+              "properties": {"alerta_id": {"type": "integer"},
+                             "nota": {"type": "string", "description": "Acción realizada"}}},
+             es_accion=True)
+def atender_alerta(usuario, alerta_id: int, nota: str):
+    from src.servicios.errores import ErrorNegocio
+    try:
+        srv_alertas.atender_alerta(usuario, int(alerta_id), nota, origen_llamada="AGENTE")
+        return {"atendida": True, "alerta_id": int(alerta_id)}
+    except ErrorNegocio as e:
+        return {"atendida": False, "error": str(e)}

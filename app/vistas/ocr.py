@@ -7,8 +7,7 @@ from app.vistas.inventario import _form_registro
 from src.database.auditoria import registrar_log
 from src.ocr.extractor_fechas import extraer_fecha_texto, extraer_lote
 from src.ocr.lector_imagen import leer_texto, ocr_disponible
-from src.servicios import catalogo as srv_cat
-from src.servicios import inventario as srv_inv
+from app import datos
 
 
 def mostrar(usuario: dict):
@@ -39,7 +38,7 @@ def mostrar(usuario: dict):
             st.warning("Confianza baja: verifique los datos contra la etiqueta antes de guardar.")
     st.caption(f"Texto leído: {texto}")
     st.markdown("#### Confirmar y registrar")
-    _form_registro(usuario, srv_inv.listar_carros(), srv_cat.listar_medicamentos(), prefijo="ocr",
+    _form_registro(usuario, datos.carros(), datos.medicamentos(), prefijo="ocr",
                    lote_ini=lote or "", fecha_ini=date.fromisoformat(fecha) if fecha and
                    date.fromisoformat(fecha) > date.today() else None,
                    origen="OCR", confianza=confianza)

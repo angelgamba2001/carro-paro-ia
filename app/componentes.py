@@ -4,44 +4,22 @@ import streamlit as st
 from src.seguridad.permisos import PermisoDenegado
 from src.servicios.errores import ErrorNegocio
 
-COLORES = {
-    "vigente": "#12B76A", "proximo_a_vencer": "#F79009", "vencido": "#D92D20",
-    "agotado": "#98A2B3", "dado_de_baja": "#667085",
-    "ALTA": "#D92D20", "MEDIA": "#F79009", "BAJA": "#1F4E79",
-    "tinta": "#1D2939", "azul": "#1F4E79", "rojo_carro": "#B42318",
-}
-SERIE = ["#1F4E79", "#B42318", "#12B76A", "#F79009", "#7A5AF8", "#0E9384", "#667085"]
-
-CSS = """
-<style>
-  .block-container {padding-top: 1.6rem; max-width: 1400px;}
-  h1, h2, h3 {letter-spacing: -0.01em;}
-  .cabecera {display:flex; align-items:baseline; gap:.8rem; border-bottom:3px solid #B42318;
-             padding-bottom:.4rem; margin-bottom:1rem;}
-  .cabecera .titulo {font-size:1.75rem; font-weight:700; margin:0; color:#1D2939; line-height:1.2;}
-  .cabecera span {color:#667085; font-size:.95rem;}
-  .kpi {background:#FFFFFF; border:1px solid #E4E7EC; border-left:5px solid var(--c,#1F4E79);
-        border-radius:6px; padding:.7rem .9rem; height:100%;}
-  .kpi .v {font-size:1.55rem; white-space:nowrap; font-weight:700; color:#1D2939; line-height:1.15;}
-  .kpi .t {font-size:.85rem; color:#475467;}
-  .kpi .d {font-size:.78rem; color:#667085; margin-top:.2rem;}
-  .carro {border-radius:8px; padding:.55rem .7rem; color:#fff; margin-bottom:.6rem; min-height:122px;}
-  .carro .cod {font-weight:700; font-size:1.02rem;}
-  .carro .srv {font-size:.78rem; opacity:.9;}
-  .carro .est {font-size:.82rem; margin-top:.35rem;}
-  .etiqueta-ia {display:inline-block; background:#EEF4FF; color:#1F4E79; border:1px solid #C7D7FE;
-                border-radius:4px; padding:.05rem .4rem; font-size:.75rem;}
-  [data-testid="stSidebar"] {border-right:1px solid #E4E7EC;}
-</style>
-"""
+from app.estilos import APP, BASE, COLORES, SERIE  # noqa: F401
 
 
 def estilos():
-    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(f"<style>{BASE}{APP}</style>", unsafe_allow_html=True)
+
+
 
 
 def cabecera(titulo: str, subtitulo: str = ""):
     st.markdown(f'<div class="cabecera"><div class="titulo">{titulo}</div><span>{subtitulo}</span></div>', unsafe_allow_html=True)
+
+
+def seccion(texto: str):
+    """Encabezado de sección dentro de una pantalla."""
+    st.markdown(f'<div class="seccion">{texto}</div>', unsafe_allow_html=True)
 
 
 def kpi(col, titulo: str, valor, detalle: str = "", color: str = COLORES["azul"]):
@@ -49,19 +27,30 @@ def kpi(col, titulo: str, valor, detalle: str = "", color: str = COLORES["azul"]
                  f'<div class="v">{valor}</div><div class="d">{detalle}</div></div>', unsafe_allow_html=True)
 
 
+def numero(v, decimales: int = 1, signo: bool = False) -> str:
+    """Formato colombiano: coma decimal y punto de miles. 1234.5 -> 1.234,5"""
+    if v is None:
+        return "—"
+    s = f"{v:{'+' if signo else ''},.{decimales}f}"
+    return s.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
 def moneda(v, compacta: bool = False) -> str:
     """Formato colombiano: $1.235.000 · compacta: $1,2 M"""
     if v is None:
         return "—"
     if compacta and abs(v) >= 1_000_000:
-        return f"${v / 1_000_000:,.1f} M".replace(".", ",")
-    return f"${v:,.0f}".replace(",", ".")
+        return f"${numero(v / 1_000_000)} M"
+    return f"${numero(v, 0)}"
 
 
 def accion(fn, *args, exito: str | None = None, **kwargs):
-    """Ejecuta una operación de servicio mostrando errores de negocio y de permisos de forma segura."""
+    """Ejecuta una operación de servicio mostrando errores de negocio y de permisos de forma segura.
+    Tras una escritura correcta vacía la memoria intermedia: lo que se ve después es el dato real."""
+    from app.datos import refrescar
     try:
         r = fn(*args, **kwargs)
+        refrescar()
         if exito:
             st.session_state["mensaje_exito"] = exito
         return r

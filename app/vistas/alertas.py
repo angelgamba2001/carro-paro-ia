@@ -1,6 +1,7 @@
 import plotly.express as px
 import streamlit as st
 
+from app import datos
 from app.componentes import COLORES, accion, cabecera, descargas
 from src.seguridad.permisos import tiene_permiso
 from src.servicios import alertas as srv
@@ -11,7 +12,8 @@ def mostrar(usuario: dict):
     c1, c2 = st.columns([2, 1])
     tipos = c1.multiselect("Tipo", srv.TIPOS)
     pendientes = c2.toggle("Solo pendientes", value=True)
-    df = srv.listar_alertas(usuario, solo_pendientes=pendientes, tipos=tipos or None)
+    df = datos.alertas(usuario, datos.firma(usuario), solo_pendientes=pendientes,
+                       tipos=tuple(tipos) if tipos else None)
     if df.empty:
         st.success("No hay alertas con esos filtros.")
         return

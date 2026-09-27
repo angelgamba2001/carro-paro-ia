@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="color-scheme" content="light">
+<title>Tablero · Carro de Paro</title>
+<link rel="stylesheet" href="css/tema.css">
+</head>
+<body>
+
+<header class="cabecera" id="cabecera"></header>
+
+<main class="contenido">
+  <div id="avisos"></div>
+
+  <div class="seccion">Estado general</div>
+  <div id="kpis" class="kpis"><div class="cargando">Consultando…</div></div>
+
+  <div class="seccion">Semáforo de carros</div>
+  <p class="nota" style="margin:-.2rem 0 .7rem">En rojo, los carros a los que les falta un
+    medicamento crítico o tienen lotes vencidos. En ámbar, faltantes no críticos o lotes por
+    vencer. En verde, completos y vigentes.</p>
+  <div id="carros" class="carros"><div class="cargando">Consultando…</div></div>
+
+  <div class="botones" style="margin-top:1.4rem">
+    <button type="button" id="btn-actualizar">Actualizar</button>
+  </div>
+</main>
+
+<nav class="barra-inferior" id="navegacion"></nav>
+
+<script src="cordova.js"></script>
+<script src="js/api.js"></script>
+<script>
+(function () {
+  'use strict';
+  if (!UI.exigirSesion()) return;
+  UI.cabecera('Tablero', 'Estado de los carros de paro');
+  UI.navegacion('tablero');
+
+  /* El color del carro resume su situación. Se calcula aquí, en el cliente,
+     a partir del stock: la API entrega los datos crudos y cada consumidor
+     decide cómo presentarlos. */
+  function clasificar(filas) {
+    const faltantes = filas.filter((f) => f.stock < f.stock_minimo);
+    const criticos = faltantes.filter((f) => f.criticidad === 'ALTA');
+    if (criticos.length) return { color: 'var(--carro)', texto: '#fff', nivel: 'rojo' };
+    if (faltantes.length) return { color: 'var(--ambar-fondo)', texto: 'var(--ambar-texto)', nivel: 'ambar' };
+    return { color: '#D7EFEC', texto: '#0B5A54', nivel: 'verde' };
+  }
+
+  function pintarKpis(k) {
+    const o = k.operativos || k;
+    const tarjetas = [
+      { t: 'Carros completos', v: `${o.carros_completos}/${o.total_carros}`,
+        d: `${UI.numero(o.disponibilidad_pct, 1)} % con los críticos completos`, c: 'var(--monitor)' },
+      { t: 'Unidades vencidas', v: UI.numero(o.unidades_vencidas),
+        d: 'deben retirarse del carro', c: 'var(--carro)' },
+      { t: 'Próximas a vencer', v: UI.numero(o.unidades_proximas),
+        d: 'en los próximos 30 días', c: 'var(--ambar)' },
+      { t: 'Valor en riesgo', v: UI.moneda(o.valor_en_riesgo),
+        d: 'vencido más por vencer', c: 'var(--grafito)' },
+      { t: 'Alertas pendientes', v: UI.numero(o.alertas_pendientes),
+        d: `${UI.numero(o.alertas_altas)} de severidad alta`, c: 'var(--carro)' },
+      { t: 'Consumo 30 días', v: UI.numero(o.consumo_30d),
+        d: `${o.variacion_consumo_pct >= 0 ? '+' : ''}${UI.numero(o.variacion_consumo_pct, 1)} % frente al periodo previo`,
+        c: 'var(--grafito)' },
+    ];
+    document.getElementById('kpis').innerHTML = tarjetas.map((x) =>
+      `<div class="kpi" style="--c:${x.c}">
+         <div class="t">${UI.limpio(x.t)}</div>
+         <div class="v">${UI.limpio(x.v)}</div>
+         <div class="d">${UI.limpio(x.d)}</div>
+       </div>`).join('');
+  }
+
+  function pintarCarros(stock) {
+    const porCarro = {};
+    stock.forEach((f) => {
+      (porCarro[f.carro] = porCarro[f.carro] || { servicio: f.servicio, filas: [] }).filas.push(f);
+    });
+    const codigos = Object.keys(porCarro).sort();
+    if (!codigos.length) { UI.vacio('carros', 'No hay carros registrados todavía.'); return; }
+
+    document.getElementById('carros').innerHTML = codigos.map((codigo) => {
+      const datos = porCarro[codigo];
+      const c = clasificar(datos.filas);
+      const faltantes = datos.filas.filter((f) => f.stock < f.stock_minimo);
+      const criticos = faltantes.filter((f) => f.criticidad === 'ALTA').length;
+      const detalle = faltantes.length
+        ? `${faltantes.length} faltante${faltantes.length > 1 ? 's' : ''} (${criticos} crítico${criticos === 1 ? '' : 's'})`
+        : 'Completo';
+      return `<a class="carro-ficha" href="inventario.html?carro=${encodeURIComponent(codigo)}"
+                 style="background:${c.color};color:${c.texto};text-decoration:none">
+          <span class="cod">${UI.limpio(codigo)}</span>
+          <span class="srv">${UI.limpio(datos.servicio)}</span>
+          <span class="est">${UI.limpio(detalle)}</span>
+        </a>`;
+    }).join('');
+  }
+
+  async function cargar() {
+    UI.cargando('kpis'); UI.cargando('carros');
+    document.getElementById('avisos').innerHTML = '';
+    try {
+      const [k, stock] = await Promise.all([API.kpis(), API.stock()]);
+      pintarKpis(k);
+      pintarCarros(stock);
+    } catch (err) {
+      document.getElementById('kpis').innerHTML = '';
+      document.getElementById('carros').innerHTML = '';
+      UI.aviso('avisos', err.message);
+    }
+  }
+
+  document.getElementById('btn-actualizar').addEventListener('click', cargar);
+  cargar();
+})();
+</script>
+</body>
+</html>

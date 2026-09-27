@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="format-detection" content="telephone=no">
+<meta name="color-scheme" content="light">
+<title>Acceso · Carro de Paro</title>
+<link rel="stylesheet" href="css/tema.css">
+</head>
+<body>
+
+<div class="acceso">
+  <div class="marca">
+    <b>SMARTDATA&nbsp;360</b>
+    <span>carro de paro</span>
+    <div class="regla"></div>
+  </div>
+
+  <div id="avisos"></div>
+
+  <!-- Paso 1: credenciales -->
+  <form id="form-acceso" autocomplete="on">
+    <div class="campo">
+      <label for="correo">Correo institucional</label>
+      <input type="email" id="correo" name="username" inputmode="email"
+             autocomplete="username" autocapitalize="off" autocorrect="off" required>
+    </div>
+    <div class="campo">
+      <label for="clave">Contraseña</label>
+      <input type="password" id="clave" name="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="primario" id="btn-entrar">Ingresar</button>
+  </form>
+
+  <!-- Paso 2: segundo factor -->
+  <form id="form-mfa" autocomplete="off" style="display:none">
+    <p class="nota" id="texto-mfa" style="margin-bottom:1rem"></p>
+    <div class="campo">
+      <label for="codigo">Código de verificación</label>
+      <input type="text" id="codigo" inputmode="numeric" pattern="[0-9A-Za-z]*"
+             maxlength="9" autocomplete="one-time-code" required>
+    </div>
+    <button type="submit" class="primario" id="btn-verificar">Verificar</button>
+    <div class="botones">
+      <button type="button" id="btn-volver">Volver</button>
+    </div>
+  </form>
+
+  <div class="botones" style="margin-top:1.6rem">
+    <button type="button" id="btn-servidor">Configurar servidor</button>
+  </div>
+
+  <!-- Dirección del backend: sin esto la app no sabe con quién hablar -->
+  <div id="panel-servidor" style="display:none;margin-top:.9rem">
+    <div class="campo">
+      <label for="url">Dirección del servidor</label>
+      <input type="url" id="url" inputmode="url" autocapitalize="off" autocorrect="off"
+             placeholder="http://192.168.1.12:8000">
+    </div>
+    <div class="botones dos">
+      <button type="button" id="btn-probar">Probar</button>
+      <button type="button" class="primario" id="btn-guardar-url">Guardar</button>
+    </div>
+    <p class="nota">El teléfono no alcanza el <span class="dato">localhost</span> del computador.
+      Use la dirección de red que muestra Streamlit al arrancar
+      (<span class="dato">Network URL</span>), cambiando el puerto por el de la API.</p>
+  </div>
+
+  <p class="nota" style="margin-top:1.6rem">El acceso queda registrado. Tras cinco intentos
+    fallidos la cuenta se bloquea 15 minutos.</p>
+</div>
+
+<script src="cordova.js"></script>
+<script src="js/api.js"></script>
+<script>
+(function () {
+  'use strict';
+  const formAcceso = document.getElementById('form-acceso');
+  const formMfa = document.getElementById('form-mfa');
+  const panel = document.getElementById('panel-servidor');
+
+  // Si ya hay sesión válida, no hacer pasar otra vez por el acceso
+  if (API.hayToken() && API.permisos().length) location.replace('tablero.html');
+
+  const motivo = new URLSearchParams(location.search).get('motivo');
+  if (motivo) UI.aviso('avisos', motivo, 'info');
+
+  document.getElementById('url').value = API.urlBase();
+
+  function ocupado(boton, texto) {
+    boton.disabled = true;
+    boton.dataset.original = boton.textContent;
+    boton.textContent = texto;
+  }
+  function libre(boton) {
+    boton.disabled = false;
+    if (boton.dataset.original) boton.textContent = boton.dataset.original;
+  }
+
+  function entrar(resultado) {
+    location.replace(resultado.debeCambiar ? 'perfil.html?cambiar=1' : 'tablero.html');
+  }
+
+  formAcceso.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const boton = document.getElementById('btn-entrar');
+    document.getElementById('avisos').innerHTML = '';
+    ocupado(boton, 'Verificando…');
+    try {
+      const r = await API.login(
+        document.getElementById('correo').value.trim(),
+        document.getElementById('clave').value);
+      if (r.mfa) {
+        formAcceso.style.display = 'none';
+        formMfa.style.display = '';
+        document.getElementById('texto-mfa').textContent = r.mensaje || '';
+        document.getElementById('codigo').focus();
+      } else {
+        entrar(r);
+      }
+    } catch (err) {
+      UI.aviso('avisos', err.message);
+    } finally {
+      libre(boton);
+    }
+  });
+
+  formMfa.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const boton = document.getElementById('btn-verificar');
+    document.getElementById('avisos').innerHTML = '';
+    ocupado(boton, 'Verificando…');
+    try {
+      entrar(await API.verificarMfa(document.getElementById('codigo').value.trim()));
+    } catch (err) {
+      UI.aviso('avisos', err.message);
+      document.getElementById('codigo').value = '';
+    } finally {
+      libre(boton);
+    }
+  });
+
+  document.getElementById('btn-volver').addEventListener('click', () => {
+    API.cerrarSesion();                 // descarta el token temporal del segundo factor
+    formMfa.style.display = 'none';
+    formAcceso.style.display = '';
+    document.getElementById('avisos').innerHTML = '';
+  });
+
+  document.getElementById('btn-servidor').addEventListener('click', () => {
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
+  });
+
+  document.getElementById('btn-probar').addEventListener('click', async () => {
+    const boton = document.getElementById('btn-probar');
+    const anterior = API.urlBase();
+    API.fijarUrl(document.getElementById('url').value);
+    ocupado(boton, 'Probando…');
+    try {
+      const s = await API.salud();
+      UI.aviso('avisos', `Servidor en línea. Base de datos: ${s.base_de_datos}.`, 'ok');
+    } catch (err) {
+      API.fijarUrl(anterior);           // no dejar guardada una dirección que no responde
+      UI.aviso('avisos', err.message);
+    } finally {
+      libre(boton);
+    }
+  });
+
+  document.getElementById('btn-guardar-url').addEventListener('click', () => {
+    API.fijarUrl(document.getElementById('url').value);
+    UI.aviso('avisos', 'Dirección guardada: ' + API.urlBase(), 'ok');
+    panel.style.display = 'none';
+  });
+})();
+</script>
+</body>
+</html>

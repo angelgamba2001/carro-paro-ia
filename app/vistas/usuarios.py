@@ -8,6 +8,8 @@ from src.servicios import usuarios as srv
 
 def mostrar(usuario: dict):
     cabecera("Usuarios", "Cuentas, roles y bloqueos")
+    if tiene_permiso(usuario, "usuarios.gestionar"):
+        _solicitudes(usuario)
     df = srv.listar_usuarios(usuario)
     st.dataframe(df, hide_index=True, width="stretch",
                  column_config={"activo": st.column_config.CheckboxColumn("activo"),
@@ -49,7 +51,14 @@ def mostrar(usuario: dict):
         sel = st.selectbox("Usuario", list(otros))
         uid = otros[sel]
         fila = df[df["id"] == uid].iloc[0]
-        nuevo_rol = st.selectbox("Rol", list(ROLES), index=list(ROLES).index(fila["rol"]),
+        # Una cuenta recién registrada tiene el perfil SIN_ASIGNAR, que no está en la
+        # matriz de roles operativos: ahí el selector arranca en el primero de la lista.
+        claves = list(ROLES)
+        actual = claves.index(fila["rol"]) if fila["rol"] in claves else 0
+        if fila["rol"] not in claves:
+            st.caption("Esta cuenta se registró por su cuenta y todavía no tiene perfil. "
+                       "Puede asignárselo aquí o desde *Solicitudes de acceso*.")
+        nuevo_rol = st.selectbox("Rol", claves, index=actual,
                                  format_func=lambda r: ROLES[r][0], key="rol_edit")
         c1, c2 = st.columns(2)
         if c1.button("Cambiar rol"):
@@ -65,3 +74,36 @@ def mostrar(usuario: dict):
                 accion(srv.restablecer_password, usuario, uid, temporal, exito="Contraseña restablecida.")
                 if "mensaje_exito" in st.session_state:
                     st.rerun()
+
+
+def _solicitudes(usuario: dict):
+    """Personas que se registraron solas y esperan que se les asigne un perfil.
+
+    Verificar el correo demuestra que el buzón es suyo, nada más. Quién puede tocar
+    un carro de paro lo decide la institución, y ese es el paso que ocurre aquí."""
+    from src import config
+    from src.servicios.registro import aprobar, pendientes, rechazar
+    solicitudes = pendientes()
+    # Con el registro cerrado y sin nada que revisar, el panel sobra
+    if not solicitudes and not config.REGISTRO_ABIERTO:
+        return
+    titulo = f"Solicitudes de acceso ({len(solicitudes)})"
+    with st.expander(titulo, expanded=bool(solicitudes)):
+        if not solicitudes:
+            st.caption("No hay solicitudes pendientes. Aquí aparecen las personas que se "
+                       "registraron por su cuenta y ya confirmaron su correo.")
+            return
+        for s in solicitudes:
+            st.markdown(f'<div class="seccion">{s["nombre"]}</div>', unsafe_allow_html=True)
+            st.caption(f'{s["correo"]} · solicitó el {s["fecha_creacion"]:%d/%m/%Y a las %H:%M}')
+            izq, centro, der = st.columns([2, 1, 1], vertical_alignment="bottom")
+            rol = izq.selectbox("Perfil que se le asigna", list(ROLES),
+                                format_func=lambda r: ROLES[r][0], key=f"rol_{s['id']}")
+            if centro.button("Autorizar", type="primary", width="stretch", key=f"ok_{s['id']}"):
+                r = aprobar(usuario, s["id"], rol)
+                st.session_state["mensaje_exito" if r.ok else "mensaje_error"] = r.mensaje
+                st.rerun()
+            if der.button("Rechazar", width="stretch", key=f"no_{s['id']}"):
+                r = rechazar(usuario, s["id"], "No corresponde a personal autorizado")
+                st.session_state["mensaje_exito" if r.ok else "mensaje_error"] = r.mensaje
+                st.rerun()

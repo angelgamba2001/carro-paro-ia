@@ -1,10 +1,38 @@
+# Tema nativo de la aplicación.
+#
+# Definir aquí el sistema de diseño (en vez de sobreescribirlo todo con CSS) hace
+# que cada componente de Streamlit nazca ya con la paleta y las tipografías
+# correctas, y evita que el navegador descargue una fuente que no se usa.
+
 [theme]
 base = "light"
-primaryColor = "#1F4E79"
-backgroundColor = "#F6F7F9"
-secondaryBackgroundColor = "#E9EDF2"
-textColor = "#1D2939"
-font = "sans serif"
+
+# Tipografías: IBM Plex, licencia SIL OFL (ver docs/LICENCIAS.md)
+font = "IBM Plex Sans"
+headingFont = "IBM Plex Sans"
+codeFont = "IBM Plex Mono"
+baseFontSize = 15
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+
+# Paleta: papel de sala, tinta de carcasa y rojo señalético del carro de paro
+primaryColor = "#C1121F"
+backgroundColor = "#F2F3F1"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#12171C"
+linkColor = "#0F766E"
+borderColor = "#D4D7D2"
+dataframeBorderColor = "#D4D7D2"
+codeBackgroundColor = "#E6E8E5"
+
+# Esquinas casi rectas: el lenguaje es el de un instrumento, no el de una tarjeta
+baseRadius = "0.2rem"
+buttonRadius = "0.2rem"
+showWidgetBorder = true
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F2F3F1"
+borderColor = "#D4D7D2"
 
 [server]
 headless = true
@@ -17,3 +45,6 @@ gatherUsageStats = false
 [client]
 showErrorDetails = false
 toolbarMode = "minimal"
+
+[runner]
+fastReruns = true

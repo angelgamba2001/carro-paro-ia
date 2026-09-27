@@ -66,6 +66,20 @@ CREATE TABLE usuarios (
     CONSTRAINT fk_usuarios_rol FOREIGN KEY (rol) REFERENCES roles(codigo)
 ) ENGINE=InnoDB;
 
+-- Evidencia de la aceptación de las políticas (Ley 1581 de 2012, art. 9)
+CREATE TABLE consentimientos (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id  INT NOT NULL,
+    version     VARCHAR(20) NOT NULL,
+    documento   VARCHAR(40) NOT NULL DEFAULT 'politicas',
+    origen      VARCHAR(20) NOT NULL DEFAULT 'WEB',
+    fecha       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    revocado    TINYINT NOT NULL DEFAULT 0,
+    fecha_revocacion DATETIME NULL,
+    CONSTRAINT fk_consent_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    INDEX idx_consent_usuario (usuario_id, version, revocado)
+) ENGINE=InnoDB;
+
 -- Códigos de un solo uso para recuperar el acceso si se pierde el celular
 CREATE TABLE codigos_respaldo (
     id             INT AUTO_INCREMENT PRIMARY KEY,

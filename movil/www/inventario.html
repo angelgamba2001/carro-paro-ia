@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="color-scheme" content="light">
+<title>Inventario · Carro de Paro</title>
+<link rel="stylesheet" href="css/tema.css">
+</head>
+<body>
+
+<header class="cabecera" id="cabecera"></header>
+
+<main class="contenido">
+  <div id="avisos"></div>
+
+  <div class="campo">
+    <label for="f-carro">Carro</label>
+    <select id="f-carro"><option value="">Todos los carros</option></select>
+  </div>
+  <div class="campo">
+    <label for="f-estado">Estado del lote</label>
+    <select id="f-estado">
+      <option value="">Todos</option>
+      <option value="VIGENTE">Vigente</option>
+      <option value="PROXIMO_A_VENCER">Próximo a vencer</option>
+      <option value="VENCIDO">Vencido</option>
+      <option value="AGOTADO">Agotado</option>
+    </select>
+  </div>
+
+  <div class="seccion" id="resumen">Lotes</div>
+  <div id="lista"><div class="cargando">Consultando…</div></div>
+</main>
+
+<nav class="barra-inferior" id="navegacion"></nav>
+
+<!-- Registro de consumo: solo para quien tiene el permiso -->
+<div id="panel-consumo" style="display:none;position:fixed;inset:0;z-index:40;
+     background:rgba(18,23,28,.45);align-items:flex-end;">
+  <div style="background:var(--papel);width:100%;max-height:82vh;overflow:auto;
+              padding:1.1rem 1rem calc(1.2rem + env(safe-area-inset-bottom,0px));
+              border-top:2px solid var(--carro)">
+    <div class="seccion" style="margin-top:0" id="consumo-titulo">Registrar consumo</div>
+    <p class="nota" id="consumo-detalle" style="margin-bottom:1rem"></p>
+    <div id="consumo-avisos"></div>
+    <div class="campo">
+      <label for="c-cantidad">Cantidad utilizada</label>
+      <input type="number" id="c-cantidad" min="1" step="1" value="1" inputmode="numeric">
+    </div>
+    <div class="campo">
+      <label for="c-motivo">Motivo</label>
+      <input type="text" id="c-motivo" maxlength="120" placeholder="Código azul, reposición, traslado…">
+    </div>
+    <div class="botones dos">
+      <button type="button" id="c-cancelar">Cancelar</button>
+      <button type="button" class="primario" id="c-guardar">Registrar</button>
+    </div>
+  </div>
+</div>
+
+<script src="cordova.js"></script>
+<script src="js/api.js"></script>
+<script>
+(function () {
+  'use strict';
+  if (!UI.exigirSesion()) return;
+  UI.cabecera('Inventario', 'Lotes por carro');
+  UI.navegacion('inventario');
+
+  const ETIQUETAS = {
+    vigente: ['vigente', 'Vigente'],
+    proximo_a_vencer: ['proximo', 'Próximo a vencer'],
+    vencido: ['vencido', 'Vencido'],
+    agotado: ['agotado', 'Agotado'],
+    dado_de_baja: ['agotado', 'Dado de baja'],
+  };
+
+  let carros = [];
+  let seleccionado = null;
+  const puedeConsumir = API.puede('inventario.consumo');
+
+  async function cargarCarros() {
+    try {
+      carros = await API.carros();
+    } catch (e) { carros = []; }
+    const sel = document.getElementById('f-carro');
+    sel.innerHTML = '<option value="">Todos los carros</option>' + carros.map((c) =>
+      `<option value="${c.id}">${UI.limpio(c.codigo)} — ${UI.limpio(c.servicio)}</option>`).join('');
+
+    // Si se llegó desde el tablero pulsando un carro, queda preseleccionado
+    const pedido = new URLSearchParams(location.search).get('carro');
+    if (pedido) {
+      const encontrado = carros.find((c) => c.codigo === pedido);
+      if (encontrado) sel.value = String(encontrado.id);
+    }
+  }
+
+  function ficha(f) {
+    const [clase, texto] = ETIQUETAS[f.estado] || ['agotado', f.estado || '—'];
+    const dias = f.dias_para_vencer;
+    const cuando = dias === null || dias === undefined ? ''
+      : dias < 0 ? `venció hace ${Math.abs(dias)} día${Math.abs(dias) === 1 ? '' : 's'}`
+      : dias === 0 ? 'vence hoy'
+      : `vence en ${dias} día${dias === 1 ? '' : 's'}`;
+    /* Un lote vencido NO se consume: se retira. Ofrecer el botón aquí sería
+       invitar a administrar un medicamento vencido, que es exactamente lo que
+       este sistema existe para evitar. La baja se hace desde la web, con motivo. */
+    const retirar = f.estado === 'vencido' || f.estado === 'dado_de_baja';
+    const accion = retirar
+      ? `<p class="nota" style="margin-top:.5rem">No debe administrarse. Retírelo del carro
+           y regístrelo como baja desde la aplicación web.</p>`
+      : (puedeConsumir && f.cantidad > 0
+        ? `<button type="button" data-id="${f.id}" data-med="${UI.limpio(f.medicamento)}"
+                   data-lote="${UI.limpio(f.lote || '')}" data-max="${f.cantidad}"
+                   class="consumir" style="margin-top:.6rem;min-height:40px;font-size:.86rem">
+             Registrar consumo</button>` : '');
+    return `<div class="registro">
+      <div class="fila">
+        <span class="titulo">${UI.limpio(f.medicamento)}</span>
+        <span class="cifra">${UI.numero(f.cantidad)}</span>
+      </div>
+      <div class="detalle">
+        ${UI.limpio(f.carro)} · ${UI.limpio(f.servicio)}<br>
+        Lote <span class="dato">${UI.limpio(f.lote || '—')}</span> ·
+        ${UI.fecha(f.fecha_vencimiento)}${cuando ? ' · ' + cuando : ''}
+      </div>
+      <div style="margin-top:.45rem"><span class="etiqueta ${clase}">${UI.limpio(texto)}</span></div>
+      ${accion}
+    </div>`;
+  }
+
+  /* El inventario completo son cientos de lotes. Pintarlos todos de golpe deja el
+     teléfono pensando varios segundos; se muestran por tandas. */
+  const TANDA = 40;
+  let visibles = TANDA;
+  let ultimas = [];
+
+  function pintar(filas) {
+    ultimas = filas;
+    const trozo = filas.slice(0, visibles);
+    const faltan = filas.length - trozo.length;
+    document.getElementById('lista').innerHTML = trozo.map(ficha).join('')
+      + (faltan ? `<button type="button" id="btn-mas" style="margin-top:.8rem">
+           Mostrar ${Math.min(faltan, TANDA)} más de ${faltan}</button>` : '');
+    document.querySelectorAll('.consumir').forEach((b) =>
+      b.addEventListener('click', () => abrirConsumo(b.dataset)));
+    const mas = document.getElementById('btn-mas');
+    if (mas) mas.addEventListener('click', () => { visibles += TANDA; pintar(ultimas); });
+  }
+
+  async function cargar() {
+    visibles = TANDA;
+    UI.cargando('lista');
+    document.getElementById('avisos').innerHTML = '';
+    const filtros = {};
+    const carro = document.getElementById('f-carro').value;
+    const estado = document.getElementById('f-estado').value;
+    if (carro) filtros.carro_id = carro;
+    if (estado) filtros.estado = estado;
+    try {
+      const filas = await API.inventario(filtros);
+      document.getElementById('resumen').textContent =
+        filas.length ? `${filas.length} lote${filas.length === 1 ? '' : 's'}` : 'Lotes';
+      if (!filas.length) {
+        UI.vacio('lista', 'No hay lotes que cumplan ese filtro.');
+        return;
+      }
+      pintar(filas);
+    } catch (err) {
+      document.getElementById('lista').innerHTML = '';
+      UI.aviso('avisos', err.message);
+    }
+  }
+
+  // ---- Registro de consumo ----
+  const panel = document.getElementById('panel-consumo');
+
+  function abrirConsumo(datos) {
+    seleccionado = datos;
+    document.getElementById('consumo-detalle').textContent =
+      `${datos.med} · lote ${datos.lote || '—'} · disponibles ${datos.max}`;
+    const cantidad = document.getElementById('c-cantidad');
+    cantidad.max = datos.max;
+    cantidad.value = 1;
+    document.getElementById('c-motivo').value = '';
+    document.getElementById('consumo-avisos').innerHTML = '';
+    panel.style.display = 'flex';
+  }
+
+  function cerrarConsumo() { panel.style.display = 'none'; seleccionado = null; }
+
+  document.getElementById('c-cancelar').addEventListener('click', cerrarConsumo);
+  panel.addEventListener('click', (e) => { if (e.target === panel) cerrarConsumo(); });
+
+  document.getElementById('c-guardar').addEventListener('click', async () => {
+    if (!seleccionado) return;
+    const boton = document.getElementById('c-guardar');
+    const cantidad = parseInt(document.getElementById('c-cantidad').value, 10);
+    const motivo = document.getElementById('c-motivo').value.trim();
+    if (!cantidad || cantidad < 1 || cantidad > Number(seleccionado.max)) {
+      UI.aviso('consumo-avisos', `Indique una cantidad entre 1 y ${seleccionado.max}.`);
+      return;
+    }
+    if (!motivo) { UI.aviso('consumo-avisos', 'Escriba el motivo del consumo.'); return; }
+    boton.disabled = true; boton.textContent = 'Registrando…';
+    try {
+      await API.registrarConsumo(seleccionado.id, cantidad, motivo);
+      cerrarConsumo();
+      UI.aviso('avisos', 'Consumo registrado.', 'ok');
+      await cargar();
+    } catch (err) {
+      UI.aviso('consumo-avisos', err.message);
+    } finally {
+      boton.disabled = false; boton.textContent = 'Registrar';
+    }
+  });
+
+  document.getElementById('f-carro').addEventListener('change', cargar);
+  document.getElementById('f-estado').addEventListener('change', cargar);
+
+  cargarCarros().then(cargar);
+})();
+</script>
+</body>
+</html>

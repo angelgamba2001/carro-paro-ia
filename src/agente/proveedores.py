@@ -46,6 +46,11 @@ def _norm(t: str) -> str:
 
 
 _INTENCIONES = [
+    (("compar", "cual servicio", "que servicio", "peor servicio", "mejor servicio"), "comparar_servicios"),
+    (("detalle", "estado del carro", "como esta el carro", "como va el carro", "revisa el carro"), "detalle_carro"),
+    (("busca", "buscar", "donde hay", "donde esta", "en que carro", "quedan"), "buscar_medicamento"),
+    (("pedido", "orden de compra", "orden de repos", "cuanto cuesta repon", "consolidad"), "orden_reposicion"),
+    (("historial", "evolucion", "ultimos meses", "tendencia de consumo", "se consume mas"), "historial_consumo"),
     (("venc", "caduc", "expir"), "consultar_vencimientos"),
     (("stock", "falta", "faltante", "minimo", "incomplet"), "consultar_stock_bajo"),
     (("alerta", "pendiente"), "listar_alertas_pendientes"),
@@ -53,7 +58,7 @@ _INTENCIONES = [
     (("anomal", "raro", "inusual", "sospech"), "consultar_anomalias"),
     (("perdida", "historic", "tendencia", "cumplimiento", "revision", "codigo azul"), "indicadores_historicos"),
     (("riesgo",), "matriz_riesgo"),
-    (("repon", "pedido", "comprar", "reposicion", "recomend"), "recomendar_reposicion"),
+    (("repon", "comprar", "reposicion", "recomend"), "recomendar_reposicion"),
     (("resumen", "estado general", "como esta", "kpi", "indicador"), "resumen_inventario"),
 ]
 
@@ -117,6 +122,50 @@ def _redactar(r: dict) -> str:
         return f"• {len(res)} combinaciones en riesgo ALTO. Las principales:\n" + "\n".join(
             f"   - {x['carro']}: {x['medicamento']} (puntaje {x['puntaje_riesgo']}: {x['justificacion']})"
             for x in res[:8])
+    if nombre == "detalle_carro":
+        if res.get("error"):
+            return f"• {res['error']} Carros disponibles: {', '.join(res.get('carros_disponibles', []))}"
+        lineas = [f"• {res['carro']} ({res['servicio']}): {res['unidades_totales']} unidades, "
+                  f"{res['medicamentos_bajo_minimo']} medicamentos bajo el mínimo "
+                  f"({res['criticos_bajo_minimo']} críticos), {res['lotes_vencidos']} lotes vencidos y "
+                  f"{res['lotes_por_vencer']} por vencer. Alertas abiertas: {res['alertas_pendientes']}."]
+        for x in res.get("faltantes", [])[:6]:
+            lineas.append(f"   - falta {x['medicamento']} ({x['criticidad']}): {x['stock']} de {x['stock_minimo']}")
+        return "\n".join(lineas)
+    if nombre == "comparar_servicios":
+        filas = res["comparacion"]
+        lineas = [f"   - {x['servicio']}: {x['faltantes']} faltantes ({x['faltantes_criticos']} críticos), "
+                  f"{x['unidades_vencidas']} ud vencidas, {x['combinaciones_en_riesgo']} en riesgo"
+                  for x in filas]
+        return (f"• Comparación por servicio (el más comprometido es {res['servicio_con_mas_problemas']}):\n"
+                + "\n".join(lineas))
+    if nombre == "buscar_medicamento":
+        if res.get("error"):
+            return f"• {res['error']}"
+        sin = res["carros_sin_existencias"]
+        lineas = [f"   - {x['carro']}: {x['stock']} de {x['stock_minimo']} mínimas"
+                  for x in res["existencias"][:8]]
+        return (f"• {', '.join(res['coincidencias'])}: {res['total_unidades']} unidades en total"
+                + (f", sin existencias en {', '.join(sin)}" if sin else "") + ".\n" + "\n".join(lineas))
+    if nombre == "orden_reposicion":
+        if res.get("aviso"):
+            return "• " + res["aviso"]
+        if res.get("error"):
+            return "• " + res["error"]
+        lineas = [f"   - {x['medicamento']} ({x['criticidad']}): {x['unidades']} ud para "
+                  f"{x['carros']} carros, {_cop(x['costo'])}" for x in res["pedido"][:10]]
+        return (f"• Pedido consolidado: {res['lineas']} medicamentos, {res['unidades_totales']} unidades, "
+                f"{_cop(res['costo_total'])} en total.\n" + "\n".join(lineas))
+    if nombre == "historial_consumo":
+        if res.get("aviso") or res.get("error"):
+            return "• " + (res.get("aviso") or res["error"])
+        top = res["por_servicio"][:3]
+        return (f"• {res['medicamento']} en los últimos {res['meses']} meses: "
+                f"{res['total_unidades']} unidades, tendencia {res['tendencia']}. "
+                f"Mayor consumo en " + ", ".join(f"{x['servicio']} ({int(x['unidades'])})" for x in top) + ".")
+    if nombre == "atender_alerta":
+        return ("• Alerta #{} marcada como atendida.".format(res["alerta_id"]) if res.get("atendida")
+                else f"• No se pudo atender la alerta: {res.get('error', 'error desconocido')}")
     if nombre == "recomendar_reposicion":
         items = res["items"]
         if not items:
@@ -125,6 +174,20 @@ def _redactar(r: dict) -> str:
         return (f"• Reposición sugerida ({len(items)} ítems, costo estimado {_cop(res['costo_total'])}):\n"
                 + "\n".join(lineas))
     return f"• {nombre}: {res}"
+
+
+def _medicamento_mencionado(texto: str) -> str | None:
+    """Busca en la pregunta el nombre de un medicamento del catálogo.
+    Compara por la primera palabra (el principio activo), que es como la gente los nombra."""
+    try:
+        from src.servicios.catalogo import listar_medicamentos
+        for m in listar_medicamentos():
+            clave = _norm(m["nombre"].split()[0])
+            if len(clave) >= 5 and clave in texto:
+                return m["nombre"]
+    except Exception:
+        pass
+    return None
 
 
 class ProveedorReglas(ProveedorLLM):
@@ -145,11 +208,27 @@ class ProveedorReglas(ProveedorLLM):
             m = re.search(r"cp-[a-z]+-\d+", texto)
             if m:
                 args["carro"] = m.group(0).upper()
+            medicamento = _medicamento_mencionado(texto)
+            if medicamento:
+                args["nombre"] = medicamento          # buscar_medicamento
+                args["medicamento"] = medicamento     # historial_consumo
+            for servicio in ("urgencias", "uci adultos", "uci pediatrica", "hospitalizacion",
+                             "cirugia", "pediatria"):
+                if servicio in texto:
+                    args["servicio"] = servicio.title().replace("Uci", "UCI")
+                    break
             llamadas = []
             for h in dict.fromkeys(elegidas):
-                h_args = {k: v for k, v in args.items()
-                          if k in next(x for x in herramientas if x.nombre == h).parametros.get("properties", {})}
+                parametros = next(x for x in herramientas if x.nombre == h).parametros
+                esperados = parametros.get("properties", {})
+                requeridos = parametros.get("required", [])
+                h_args = {k: v for k, v in args.items() if k in esperados}
+                if any(r not in h_args for r in requeridos):
+                    continue           # sin el dato obligatorio, la herramienta no se invoca
                 llamadas.append((h, h_args))
+            if not llamadas:
+                return Paso(respuesta="Para responder eso necesito el dato concreto: indique el carro "
+                                      "(por ejemplo CP-URG-01) o el nombre del medicamento.")
             return Paso(llamadas=llamadas)
         cuerpo = "\n".join(_redactar(r) for r in resultados)
         denegadas = getattr(self, "denegadas", [])

@@ -12,6 +12,15 @@ from src.seguridad.contrasenas import hash_password, validar_politica, verificar
 
 MENSAJE_GENERICO = "Correo o contraseña incorrectos."
 
+
+def avisar_bloqueo(usuario_id: int, motivo: str):
+    """El aviso por correo nunca puede tumbar el inicio de sesión."""
+    try:
+        from src.servicios.avisos import cuenta_bloqueada
+        cuenta_bloqueada(usuario_id, motivo)
+    except Exception:                                     # noqa: BLE001
+        pass
+
 _CAMPOS = ("id, nombre, correo, rol, activo, password_hash, intentos_fallidos, "
            "bloqueado_hasta, debe_cambiar_password")
 
@@ -23,6 +32,7 @@ class ResultadoLogin:
     mensaje: str = ""
     intentos_restantes: int | None = None
     requiere_mfa: bool = False      # contraseña correcta, falta el código de 6 dígitos
+    canal_mfa: str = ""             # "app", "correo" o "ambos": de dónde saca el código
 
 
 def _publico(u: dict) -> dict:
@@ -59,6 +69,7 @@ def autenticar(correo: str, password: str, origen: str = "WEB") -> ResultadoLogi
                      (hasta, u["id"]))
             registrar_evento_seguridad("BLOQUEO", correo, u["id"],
                                        f"{intentos} intentos fallidos; bloqueado {config.MINUTOS_BLOQUEO} min", origen)
+            avisar_bloqueo(u["id"], "intentos de ingreso con contraseña incorrecta")
             return ResultadoLogin(False, mensaje=f"Cuenta bloqueada por {config.MINUTOS_BLOQUEO} minutos "
                                                  "por intentos fallidos.")
         ejecutar("UPDATE usuarios SET intentos_fallidos = %s WHERE id = %s", (intentos, u["id"]))
@@ -70,21 +81,47 @@ def autenticar(correo: str, password: str, origen: str = "WEB") -> ResultadoLogi
         ejecutar("UPDATE usuarios SET password_hash = %s WHERE id = %s", (hash_password(password), u["id"]))
     ejecutar("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id = %s", (u["id"],))
 
-    from src.seguridad.mfa import estado_mfa
-    if estado_mfa(u["id"])["activo"]:
+    canal = canal_mfa(u["id"])
+    if canal:
         registrar_evento_seguridad("LOGIN_PASSWORD_OK", correo, u["id"], "Falta el segundo factor", origen)
+        aviso = {"app": "Ingrese el código de su aplicación de autenticación.",
+                 "correo": "Le enviamos un código a su correo institucional.",
+                 "ambos": "Ingrese el código de su aplicación, o pida uno por correo."}[canal]
         return ResultadoLogin(False, usuario=_publico(u), requiere_mfa=True,
-                              mensaje="Ingrese el código de su aplicación de autenticación.")
+                              canal_mfa=canal, mensaje=aviso)
 
-    ejecutar("UPDATE usuarios SET ultimo_acceso = NOW() WHERE id = %s", (u["id"],))
+    ejecutar("UPDATE usuarios SET ultimo_acceso = NOW(), ultimo_acceso_origen = %s WHERE id = %s",
+             (origen, u["id"]))
     registrar_evento_seguridad("LOGIN_OK", correo, u["id"], origen=origen)
     return ResultadoLogin(True, usuario=_publico(u))
 
 
-def completar_login_mfa(usuario_id: int, codigo: str, origen: str = "WEB") -> ResultadoLogin:
-    """Segundo paso del ingreso: valida el código TOTP o un código de respaldo.
-    Los intentos fallidos cuentan para el mismo bloqueo que la contraseña."""
+def canal_mfa(usuario_id: int) -> str:
+    """Por dónde puede recibir el código esta cuenta: app, correo, ambos o ninguno."""
+    from src.seguridad.mfa import estado_mfa
+    from src.seguridad.mfa_correo import disponible
+    app = estado_mfa(usuario_id)["activo"]
+    correo = disponible(usuario_id)
+    if app and correo:
+        return "ambos"
+    if app:
+        return "app"
+    return "correo" if correo else ""
+
+
+def _codigo_valido(usuario_id: int, codigo: str) -> bool:
+    """Acepta el código venga del canal que venga: app, respaldo o correo."""
     from src.seguridad.mfa import verificar_segundo_factor
+    from src.seguridad.mfa_correo import disponible, verificar as verificar_correo
+    if verificar_segundo_factor(usuario_id, codigo):
+        return True
+    return disponible(usuario_id) and verificar_correo(usuario_id, codigo)
+
+
+def completar_login_mfa(usuario_id: int, codigo: str, origen: str = "WEB") -> ResultadoLogin:
+    """Segundo paso del ingreso: valida el código, sea de la aplicación de
+    autenticación, de respaldo o el enviado al correo.
+    Los intentos fallidos cuentan para el mismo bloqueo que la contraseña."""
     u = consultar(f"SELECT {_CAMPOS} FROM usuarios WHERE id = %s", (usuario_id,), uno=True)
     if not u or not u["activo"]:
         return ResultadoLogin(False, mensaje=MENSAJE_GENERICO)
@@ -92,21 +129,23 @@ def completar_login_mfa(usuario_id: int, codigo: str, origen: str = "WEB") -> Re
     if u["bloqueado_hasta"] and u["bloqueado_hasta"] > ahora:
         return ResultadoLogin(False, mensaje="Cuenta bloqueada temporalmente.")
 
-    if not verificar_segundo_factor(usuario_id, codigo):
+    if not _codigo_valido(usuario_id, codigo):
         intentos = u["intentos_fallidos"] + 1
         if intentos >= config.MAX_INTENTOS_LOGIN:
             ejecutar("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = %s WHERE id = %s",
                      (ahora + timedelta(minutes=config.MINUTOS_BLOQUEO), usuario_id))
             registrar_evento_seguridad("BLOQUEO", u["correo"], usuario_id,
                                        "Intentos fallidos del segundo factor", origen)
+            avisar_bloqueo(usuario_id, "intentos fallidos del segundo factor")
             return ResultadoLogin(False, mensaje=f"Cuenta bloqueada por {config.MINUTOS_BLOQUEO} minutos.")
         ejecutar("UPDATE usuarios SET intentos_fallidos = %s WHERE id = %s", (intentos, usuario_id))
         registrar_evento_seguridad("MFA_FALLIDO", u["correo"], usuario_id, origen=origen)
         return ResultadoLogin(False, mensaje="Código incorrecto o ya utilizado.",
-                              intentos_restantes=config.MAX_INTENTOS_LOGIN - intentos, requiere_mfa=True)
+                              intentos_restantes=config.MAX_INTENTOS_LOGIN - intentos,
+                              requiere_mfa=True, canal_mfa=canal_mfa(usuario_id))
 
-    ejecutar("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL, ultimo_acceso = NOW() "
-             "WHERE id = %s", (usuario_id,))
+    ejecutar("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL, ultimo_acceso = NOW(), "
+             "ultimo_acceso_origen = %s WHERE id = %s", (origen, usuario_id))
     registrar_evento_seguridad("LOGIN_OK", u["correo"], usuario_id, "Con segundo factor", origen)
     return ResultadoLogin(True, usuario=_publico(u))
 
@@ -132,4 +171,9 @@ def cambiar_password(usuario_id: int, actual: str, nueva: str) -> list[str]:
     ejecutar("UPDATE usuarios SET password_hash = %s, debe_cambiar_password = 0 WHERE id = %s",
              (hash_password(nueva), usuario_id))
     registrar_evento_seguridad("CAMBIO_PASSWORD", u["correo"], usuario_id)
+    try:
+        from src.servicios.avisos import password_cambiada
+        password_cambiada(usuario_id, "el cambio desde su perfil")
+    except Exception:                                     # noqa: BLE001
+        pass
     return []

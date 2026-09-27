@@ -30,9 +30,15 @@ def mostrar(usuario: dict):
             st.toggle("Permitir que el agente registre recomendaciones en el chat", key="agente_acciones",
                       help="Desactivado: el agente solo consulta. Activado: puede crear alertas de "
                            "recomendación si usted se lo pide.")
-        st.markdown("##### Herramientas disponibles para su rol")
-        for h in herramientas:
-            st.markdown(f"- `{h.nombre}`{' · acción' if h.es_accion else ''}")
+        consultas = [h for h in herramientas if not h.es_accion]
+        acciones = [h for h in herramientas if h.es_accion]
+        st.caption(f"Su rol puede usar {len(consultas)} consultas"
+                   + (f" y {len(acciones)} acciones." if acciones else "."))
+        with st.expander("Ver el detalle"):
+            for h in consultas:
+                st.markdown(f"**{h.nombre.replace('_', ' ').capitalize()}** — {h.descripcion}")
+            for h in acciones:
+                st.markdown(f"**{h.nombre.replace('_', ' ').capitalize()}** (acción) — {h.descripcion}")
         st.divider()
         st.markdown("##### Revisión autónoma")
         st.caption("El agente recorre todos los carros, prioriza hallazgos"

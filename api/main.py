@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import jwt  # noqa: E402
 from fastapi import Depends, FastAPI, HTTPException, Request  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
@@ -34,6 +35,20 @@ from src.servicios.errores import ErrorNegocio  # noqa: E402
 
 app = FastAPI(title="SMARTDATA 360 · Carro de Paro API", version="2.0",
               description="API del módulo Carro de Paro: inventario, alertas, analítica y agente IA.")
+# La app móvil corre en un WebView con su propio origen, así que necesita CORS.
+# Se declara la lista exacta: con "*" cualquier página web podría llamar a la API
+# desde el navegador de un usuario autenticado.
+from src import config as _cfg  # noqa: E402
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _cfg.CORS_ORIGENES.split(",") if o.strip()],
+    allow_credentials=False,        # el token va en la cabecera, no en cookies
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    max_age=600,
+)
+
 esquema_bearer = HTTPBearer(auto_error=False)
 agente = AgenteCarroParo()
 
@@ -120,7 +135,31 @@ class Atencion(BaseModel):
 
 
 def _df(df):
-    return df.to_dict(orient="records") if hasattr(df, "to_dict") else df
+    """DataFrame -> lista de diccionarios lista para JSON.
+
+    Los huecos de pandas (NaN, NaT, pd.NA) no son JSON válido: el estándar no
+    admite NaN ni Infinity, y el serializador aborta con «Out of range float
+    values». Se convierten a null, que es lo que cualquier cliente espera ver
+    en un campo vacío. Sin esto, cualquier listado con una fecha sin llenar
+    —una alerta todavía no atendida, por ejemplo— devuelve un error 500.
+    """
+    if not hasattr(df, "to_dict"):
+        return df
+    import math
+
+    import pandas as pd
+
+    def limpiar(v):
+        if v is None or v is pd.NaT:
+            return None
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        if v is pd.NA:
+            return None
+        return v
+
+    return [{k: limpiar(v) for k, v in fila.items()}
+            for fila in df.where(df.notna(), None).to_dict(orient="records")]
 
 
 # ------------------------- endpoints -------------------------

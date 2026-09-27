@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="color-scheme" content="light">
+<title>Alertas · Carro de Paro</title>
+<link rel="stylesheet" href="css/tema.css">
+</head>
+<body>
+
+<header class="cabecera" id="cabecera"></header>
+
+<main class="contenido">
+  <div id="avisos"></div>
+
+  <div class="campo">
+    <label for="f-ver">Mostrar</label>
+    <select id="f-ver">
+      <option value="true">Solo pendientes</option>
+      <option value="false">Todas, incluidas las atendidas</option>
+    </select>
+  </div>
+
+  <div class="seccion" id="resumen">Alertas</div>
+  <div id="lista"><div class="cargando">Consultando…</div></div>
+</main>
+
+<nav class="barra-inferior" id="navegacion"></nav>
+
+<div id="panel" style="display:none;position:fixed;inset:0;z-index:40;
+     background:rgba(18,23,28,.45);align-items:flex-end;">
+  <div style="background:var(--papel);width:100%;max-height:82vh;overflow:auto;
+              padding:1.1rem 1rem calc(1.2rem + env(safe-area-inset-bottom,0px));
+              border-top:2px solid var(--carro)">
+    <div class="seccion" style="margin-top:0">Atender alerta</div>
+    <p class="nota" id="p-detalle" style="margin-bottom:1rem"></p>
+    <div id="p-avisos"></div>
+    <div class="campo">
+      <label for="p-nota">Qué se hizo</label>
+      <input type="text" id="p-nota" maxlength="200" placeholder="Lote retirado y repuesto">
+    </div>
+    <div class="botones dos">
+      <button type="button" id="p-cancelar">Cancelar</button>
+      <button type="button" class="primario" id="p-guardar">Marcar atendida</button>
+    </div>
+  </div>
+</div>
+
+<script src="cordova.js"></script>
+<script src="js/api.js"></script>
+<script>
+(function () {
+  'use strict';
+  if (!UI.exigirSesion()) return;
+  UI.cabecera('Alertas', 'Lo que requiere acción');
+  UI.navegacion('alertas');
+
+  const SEVERIDAD = { ALTA: ['alta', 'Alta'], MEDIA: ['media', 'Media'], BAJA: ['baja', 'Baja'] };
+  const TIPOS = {
+    VENCIMIENTO: 'Vencimiento',
+    STOCK_BAJO: 'Stock bajo',
+    RIESGO_DESABASTECIMIENTO: 'Riesgo de desabastecimiento',
+    CONSUMO_ANOMALO: 'Consumo anómalo',
+  };
+  const puedeAtender = API.puede('alertas.atender');
+  let seleccionada = null;
+
+  function ficha(a) {
+    const [clase, texto] = SEVERIDAD[a.severidad] || ['baja', a.severidad || '—'];
+    const atendida = Number(a.atendida) === 1;
+    const accion = puedeAtender && !atendida
+      ? `<button type="button" class="atender" data-id="${a.id}"
+                 data-msg="${UI.limpio(a.mensaje)}"
+                 style="margin-top:.6rem;min-height:40px;font-size:.86rem">Atender</button>` : '';
+    const cierre = atendida
+      ? `<div class="detalle" style="margin-top:.45rem">
+           Atendida por ${UI.limpio(a.atendida_por || '—')} el ${UI.fecha(a.fecha_atencion)}
+           ${a.nota_atencion ? '<br>' + UI.limpio(a.nota_atencion) : ''}</div>` : '';
+    return `<div class="registro">
+      <div class="fila">
+        <span class="titulo">${UI.limpio(TIPOS[a.tipo] || a.tipo)}</span>
+        <span class="etiqueta ${clase}">${UI.limpio(texto)}</span>
+      </div>
+      <div class="detalle">${UI.limpio(a.mensaje)}</div>
+      <div class="detalle" style="margin-top:.3rem">
+        ${UI.limpio(a.carro || '—')}${a.medicamento ? ' · ' + UI.limpio(a.medicamento) : ''}
+        · ${UI.fecha(a.fecha_generada)}
+      </div>
+      ${cierre}${accion}
+    </div>`;
+  }
+
+  async function cargar() {
+    UI.cargando('lista');
+    document.getElementById('avisos').innerHTML = '';
+    const soloPendientes = document.getElementById('f-ver').value === 'true';
+    try {
+      const filas = await API.alertas(soloPendientes);
+      const altas = filas.filter((a) => a.severidad === 'ALTA' && Number(a.atendida) === 0).length;
+      document.getElementById('resumen').textContent = filas.length
+        ? `${filas.length} alerta${filas.length === 1 ? '' : 's'}` + (altas ? ` · ${altas} de severidad alta` : '')
+        : 'Alertas';
+      if (!filas.length) {
+        UI.vacio('lista', soloPendientes
+          ? 'No hay alertas pendientes. Todo está al día.'
+          : 'No se han generado alertas todavía.');
+        return;
+      }
+      document.getElementById('lista').innerHTML = filas.map(ficha).join('');
+      document.querySelectorAll('.atender').forEach((b) =>
+        b.addEventListener('click', () => abrir(b.dataset)));
+    } catch (err) {
+      document.getElementById('lista').innerHTML = '';
+      UI.aviso('avisos', err.message);
+    }
+  }
+
+  const panel = document.getElementById('panel');
+  function abrir(datos) {
+    seleccionada = datos;
+    document.getElementById('p-detalle').textContent = datos.msg;
+    document.getElementById('p-nota').value = '';
+    document.getElementById('p-avisos').innerHTML = '';
+    panel.style.display = 'flex';
+  }
+  function cerrar() { panel.style.display = 'none'; seleccionada = null; }
+
+  document.getElementById('p-cancelar').addEventListener('click', cerrar);
+  panel.addEventListener('click', (e) => { if (e.target === panel) cerrar(); });
+
+  document.getElementById('p-guardar').addEventListener('click', async () => {
+    if (!seleccionada) return;
+    const boton = document.getElementById('p-guardar');
+    const nota = document.getElementById('p-nota').value.trim();
+    if (!nota) { UI.aviso('p-avisos', 'Escriba qué se hizo: queda en el registro de auditoría.'); return; }
+    boton.disabled = true; boton.textContent = 'Guardando…';
+    try {
+      await API.atenderAlerta(seleccionada.id, nota);
+      cerrar();
+      UI.aviso('avisos', 'Alerta marcada como atendida.', 'ok');
+      await cargar();
+    } catch (err) {
+      UI.aviso('p-avisos', err.message);
+    } finally {
+      boton.disabled = false; boton.textContent = 'Marcar atendida';
+    }
+  });
+
+  document.getElementById('f-ver').addEventListener('change', cargar);
+  cargar();
+})();
+</script>
+</body>
+</html>

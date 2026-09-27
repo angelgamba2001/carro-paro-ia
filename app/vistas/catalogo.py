@@ -1,12 +1,13 @@
 import streamlit as st
 
+from app import datos
 from app.componentes import accion, cabecera
 from src.servicios import catalogo as srv
 
 
 def mostrar(usuario: dict):
     cabecera("Catálogo", "Medicamentos de la dotación y sus parámetros de stock")
-    df = srv.catalogo_df()
+    df = datos.catalogo_df()
     st.dataframe(df, hide_index=True, width="stretch",
                  column_config={"costo_unitario": st.column_config.NumberColumn("costo (COP)", format="%.0f")})
     izq, der = st.columns(2)

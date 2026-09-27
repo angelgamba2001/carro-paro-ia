@@ -3,9 +3,7 @@ import streamlit as st
 
 from app.componentes import accion, cabecera
 from src import config
-from src.analitica.prediccion import leer_metricas
-from src.bigdata.orquestador import ejecutar_flujo_completo
-from src.bigdata.procesamiento import leer_gold, ultima_ejecucion
+from app import datos
 
 FLUJO = """
 Fuentes                    Zona RAW            BRONZE          SILVER                    GOLD                 Uso
@@ -39,6 +37,7 @@ def mostrar(usuario: dict):
         st.caption("Spark requiere Java 17+ instalado. Si no está disponible se usa pandas automáticamente.")
         if st.button("Ejecutar flujo completo", type="primary", width="stretch"):
             estado = st.status("Ejecutando pipeline...", expanded=True)
+            from src.bigdata.orquestador import ejecutar_flujo_completo   # carga PySpark al usarlo
             r = accion(ejecutar_flujo_completo, usuario, motor, avisar=estado.write)
             if r:
                 estado.update(label=f"Completado en {r['procesamiento']['segundos']} s", state="complete")
@@ -46,7 +45,7 @@ def mostrar(usuario: dict):
             else:
                 estado.update(label="Falló la ejecución", state="error")
     with der:
-        ejec = ultima_ejecucion()
+        ejec = datos.ejecucion_pipeline()
         if ejec:
             st.markdown(f"**Última ejecución:** {ejec['fecha'].replace('T', ' ')} · motor {ejec['motor']} · "
                         f"{ejec['segundos']} s · {ejec['descartadas_limpieza']} registros descartados en limpieza")
@@ -56,7 +55,7 @@ def mostrar(usuario: dict):
         else:
             st.info("Aún no hay ejecuciones. Genere el histórico (scripts/generar_historico.py) y ejecute el flujo.")
 
-    met = leer_metricas()
+    met = datos.metricas_modelo()
     if met:
         st.markdown("#### Modelo de predicción de demanda")
         c = st.columns(4)
@@ -66,7 +65,7 @@ def mostrar(usuario: dict):
         c[3].metric("Filas de entrenamiento", f"{met['filas_entrenamiento']:,}".replace(",", "."))
         st.caption(f"{met['modelo']} · horizonte {met['horizonte_dias']} días · evaluado en "
                    f"{met['filas_prueba']:,} observaciones no vistas".replace(",", "."))
-    cal = leer_gold("calidad_datos")
+    cal = datos.gold("calidad_datos")
     if not cal.empty:
         st.markdown("#### Calidad de datos")
         st.dataframe(cal, hide_index=True, width="stretch")

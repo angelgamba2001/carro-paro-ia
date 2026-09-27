@@ -24,3 +24,6 @@ derby.log
 # Sistema operativo
 .DS_Store
 Thumbs.db
+
+# Herramienta de autoría de interfaz: se versiona el skill, no su binario descargado
+.claude/skills/impeccable/scripts/data/

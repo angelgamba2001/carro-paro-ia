@@ -29,6 +29,51 @@ JWT_SECRETO = os.getenv("JWT_SECRETO", "")
 JWT_MINUTOS_EXPIRACION = _int("JWT_MINUTOS_EXPIRACION", 30)
 ENTORNO = os.getenv("ENTORNO", "desarrollo")  # desarrollo | produccion
 
+
+def _bool(nombre: str, defecto: bool = False) -> bool:
+    return os.getenv(nombre, str(defecto)).strip().lower() in ("1", "true", "si", "sí", "yes")
+
+
+# --- Identidad institucional y correo ---
+# Dominios admitidos al crear usuarios. Vacío = cualquier dominio válido.
+#   Ejemplo:  DOMINIOS_CORREO=husanrafael.co,unipamplona.edu.co
+DOMINIOS_CORREO = os.getenv("DOMINIOS_CORREO", "")
+CORREO_INSTITUCION = os.getenv("CORREO_INSTITUCION", "Hospital Universitario San Rafael")
+CORREO_MODO = os.getenv("CORREO_MODO", "archivo")      # smtp | archivo | desactivado
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.office365.com")
+SMTP_PUERTO = _int("SMTP_PUERTO", 587)
+SMTP_SSL = _bool("SMTP_SSL", False)                    # False = STARTTLS (587); True = SSL (465)
+SMTP_USUARIO = os.getenv("SMTP_USUARIO", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_TIMEOUT = _int("SMTP_TIMEOUT", 20)
+CORREO_REMITENTE = os.getenv("CORREO_REMITENTE", "")   # si se omite, se usa SMTP_USUARIO
+
+# Segundo factor enviado por correo (alternativa al TOTP)
+MFA_CORREO_MINUTOS = _int("MFA_CORREO_MINUTOS", 10)
+MFA_CORREO_MAX_INTENTOS = _int("MFA_CORREO_MAX_INTENTOS", 5)
+
+# --- Inicio de sesión con Microsoft (Entra ID / Azure AD) ---
+MS_CLIENT_ID = os.getenv("MS_CLIENT_ID", "")
+MS_TENANT_ID = os.getenv("MS_TENANT_ID", "common")
+MS_CLIENT_SECRET = os.getenv("MS_CLIENT_SECRET", "")
+MS_REDIRECT_URI = os.getenv("MS_REDIRECT_URI", "http://localhost:8501")
+# Si un correo de Microsoft no existe en la BD: rechazarlo o crear la cuenta con este rol
+MS_ROL_POR_DEFECTO = os.getenv("MS_ROL_POR_DEFECTO", "")
+
+# --- Registro de usuarios por cuenta propia ---
+REGISTRO_ABIERTO = _bool("REGISTRO_ABIERTO", True)
+# Vacío = la cuenta queda esperando que un administrador le asigne el rol.
+# Con un rol = se activa sola al verificar el correo. Use el de menos privilegios.
+REGISTRO_ROL_INICIAL = os.getenv("REGISTRO_ROL_INICIAL", "")
+REGISTRO_MINUTOS_CODIGO = _int("REGISTRO_MINUTOS_CODIGO", 20)
+
+# --- API: orígenes autorizados (app móvil) ---
+# Cordova sirve la app desde https://localhost en Android y capacitor://localhost en iOS.
+# Nunca use "*": eso permitiría que cualquier sitio web llame a la API con el token.
+CORS_ORIGENES = os.getenv(
+    "CORS_ORIGENES",
+    "https://localhost,http://localhost,capacitor://localhost,ionic://localhost")
+
 # --- Reglas de negocio ---
 DIAS_PROXIMO_VENCER = _int("DIAS_PROXIMO_VENCER", 30)
 HORIZONTE_PREDICCION_DIAS = _int("HORIZONTE_PREDICCION_DIAS", 14)

@@ -1,0 +1,50 @@
+<?xml version='1.0' encoding='utf-8'?>
+<widget id="co.smartdata360.carroparo" version="2.0.0"
+        xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+    <name>Carro de Paro</name>
+    <description>
+        Aplicación móvil del módulo Carro de Paro de SMARTDATA 360. Consulta el estado
+        de los carros de reanimación, el inventario, las alertas y el asistente, con los
+        mismos permisos por rol que la aplicación web.
+    </description>
+    <author email="alvarodavidguevara@gmail.com">Equipo SMARTDATA 360</author>
+
+    <content src="index.html" />
+
+    <!--
+      A qué servidores puede conectarse la app. NO se usa "*": eso permitiría que la
+      app hablara con cualquier host, y una inyección en el WebView podría sacar el
+      token fuera. Ajuste estas líneas a la dirección real de su API.
+    -->
+    <access origin="http://192.168.1.*:8000" />
+    <access origin="http://localhost:8000" />
+    <access origin="https://*.suhospital.co" />
+    <allow-intent href="http://*/*" />
+    <allow-intent href="https://*/*" />
+    <allow-navigation href="http://192.168.1.*:8000/*" />
+
+    <preference name="DisallowOverscroll" value="true" />
+    <preference name="BackupWebStorage" value="none" />
+    <preference name="Orientation" value="portrait" />
+    <preference name="StatusBarOverlaysWebView" value="false" />
+    <preference name="StatusBarBackgroundColor" value="#FFFFFF" />
+    <preference name="StatusBarStyle" value="default" />
+    <preference name="AndroidInsecureFileModeEnabled" value="false" />
+    <preference name="scheme" value="https" />
+    <preference name="hostname" value="localhost" />
+
+    <platform name="android">
+        <preference name="android-minSdkVersion" value="24" />
+        <preference name="AndroidLaunchMode" value="singleTask" />
+        <!-- El tráfico en claro solo se admite hacia la red local durante el desarrollo.
+             Para un despliegue real, use HTTPS y quite esta preferencia. -->
+        <edit-config file="app/src/main/AndroidManifest.xml" mode="merge"
+                     target="/manifest/application">
+            <application android:usesCleartextTraffic="true" />
+        </edit-config>
+    </platform>
+
+    <platform name="ios">
+        <preference name="WKWebViewOnly" value="true" />
+    </platform>
+</widget>

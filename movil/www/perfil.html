@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="color-scheme" content="light">
+<title>Mi cuenta · Carro de Paro</title>
+<link rel="stylesheet" href="css/tema.css">
+</head>
+<body>
+
+<header class="cabecera" id="cabecera"></header>
+
+<main class="contenido">
+  <div id="avisos"></div>
+
+  <div class="seccion">Su cuenta</div>
+  <div id="datos"><div class="cargando">Consultando…</div></div>
+
+  <div class="seccion">Lo que su perfil permite</div>
+  <div id="permisos"></div>
+
+  <div class="seccion">Servidor</div>
+  <div class="registro">
+    <div class="detalle" id="servidor"></div>
+    <div class="detalle" id="estado-servidor" style="margin-top:.35rem">Comprobando…</div>
+  </div>
+
+  <div class="botones" style="margin-top:1.4rem">
+    <button type="button" id="btn-salir">Cerrar sesión</button>
+  </div>
+
+  <p class="nota">El cambio de contraseña y la verificación en dos pasos se gestionan desde
+    la aplicación web. Esta app consume la misma API y los mismos permisos.</p>
+</main>
+
+<nav class="barra-inferior" id="navegacion"></nav>
+
+<script src="cordova.js"></script>
+<script src="js/api.js"></script>
+<script>
+(function () {
+  'use strict';
+  if (!UI.exigirSesion()) return;
+  UI.cabecera('Mi cuenta', '');
+  UI.navegacion('perfil');
+
+  const ROLES = {
+    ADMIN: 'Administrador', MEDICO: 'Médico', ENFERMERO: 'Enfermero(a)',
+    REGENTE_FARMACIA: 'Regente de farmacia', AUDITOR: 'Auditor',
+    DIRECCION_MEDICA: 'Dirección médica', ANALISTA_DATOS: 'Analista de datos',
+    OFICIAL_SEGURIDAD: 'Oficial de seguridad', TI: 'Soporte TI',
+    SIN_ASIGNAR: 'Sin perfil asignado',
+  };
+
+  if (new URLSearchParams(location.search).get('cambiar')) {
+    UI.aviso('avisos', 'Debe cambiar su contraseña desde la aplicación web antes de operar.', 'info');
+  }
+
+  document.getElementById('servidor').innerHTML =
+    'Dirección: <span class="dato">' + UI.limpio(API.urlBase()) + '</span>';
+
+  API.salud()
+    .then((s) => {
+      document.getElementById('estado-servidor').textContent =
+        'En línea · base de datos: ' + s.base_de_datos;
+    })
+    .catch((e) => { document.getElementById('estado-servidor').textContent = e.message; });
+
+  API.cargarPermisos()
+    .then((yo) => {
+      document.getElementById('datos').innerHTML = `
+        <div class="registro">
+          <div class="titulo">${UI.limpio(yo.nombre)}</div>
+          <div class="detalle">${UI.limpio(yo.correo)}</div>
+          <div style="margin-top:.5rem"><span class="etiqueta vigente">${UI.limpio(ROLES[yo.rol] || yo.rol)}</span></div>
+        </div>`;
+      const lista = (yo.permisos || []);
+      document.getElementById('permisos').innerHTML = lista.length
+        ? lista.map((p) => `<div class="registro"><span class="dato" style="font-size:.86rem">${UI.limpio(p)}</span></div>`).join('')
+        : '<div class="vacio">Su cuenta todavía no tiene permisos asignados.</div>';
+      UI.navegacion('perfil');   // los permisos pueden haber cambiado desde el último ingreso
+    })
+    .catch((err) => {
+      document.getElementById('datos').innerHTML = '';
+      UI.aviso('avisos', err.message);
+    });
+
+  document.getElementById('btn-salir').addEventListener('click', () => {
+    API.cerrarSesion();
+    location.replace('index.html');
+  });
+})();
+</script>
+</body>
+</html>

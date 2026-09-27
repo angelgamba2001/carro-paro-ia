@@ -2,9 +2,9 @@ from datetime import date, timedelta
 
 import streamlit as st
 
+from app import datos
 from app.componentes import accion, cabecera, descargas
 from src.seguridad.permisos import tiene_permiso
-from src.servicios import catalogo as srv_cat
 from src.servicios import inventario as srv_inv
 
 ESTADOS = ["vigente", "proximo_a_vencer", "vencido", "agotado", "dado_de_baja"]
@@ -16,11 +16,12 @@ def _etiqueta_lote(r) -> str:
 
 def mostrar(usuario: dict):
     cabecera("Inventario", "Lotes por carro, consumo y bajas")
-    carros = srv_inv.listar_carros()
-    meds = srv_cat.listar_medicamentos()
+    f = datos.firma(usuario)
+    carros = datos.carros()
+    meds = datos.medicamentos()
 
     f1, f2, f3, f4 = st.columns(4)
-    servicio = f1.selectbox("Servicio", ["Todos"] + srv_inv.listar_servicios())
+    servicio = f1.selectbox("Servicio", ["Todos"] + datos.servicios())
     carros_f = [c for c in carros if servicio == "Todos" or c["servicio"] == servicio]
     carro = f2.selectbox("Carro", ["Todos"] + [c["codigo"] for c in carros_f])
     estados = f3.multiselect("Estado", ESTADOS, default=["vigente", "proximo_a_vencer", "vencido"])
@@ -28,8 +29,10 @@ def mostrar(usuario: dict):
 
     carro_id = next((c["id"] for c in carros if c["codigo"] == carro), None)
     med_id = next((m["id"] for m in meds if m["nombre"] == med), None)
-    df = srv_inv.listar_inventario(usuario, carro_id=carro_id, servicio=None if servicio == "Todos" else servicio,
-                                   estados=estados or None, medicamento_id=med_id, incluir_inactivos=True)
+    df = datos.inventario(usuario, f, carro_id=carro_id,
+                          servicio=None if servicio == "Todos" else servicio,
+                          estados=tuple(estados) if estados else None, medicamento_id=med_id,
+                          incluir_inactivos=True)
     st.dataframe(df.drop(columns=["carro_id", "medicamento_id"], errors="ignore"), hide_index=True, width="stretch",
                  column_config={
                      "estado": st.column_config.TextColumn("estado"),
@@ -53,7 +56,7 @@ def mostrar(usuario: dict):
         return
     st.divider()
     tabs = st.tabs(acciones)
-    activos = srv_inv.listar_inventario(usuario, carro_id=carro_id)
+    activos = datos.inventario(usuario, f, carro_id=carro_id)
     opciones = {_etiqueta_lote(r): r["id"] for _, r in activos.iterrows()}
 
     for nombre, tab in zip(acciones, tabs):

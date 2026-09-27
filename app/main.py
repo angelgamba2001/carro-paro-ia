@@ -1,8 +1,13 @@
 """
-SMARTDATA 360 · Carro de Paro — aplicación web (Streamlit).
+SMARTDATA 360 · Carro de Paro — aplicación web.
 
     streamlit run app/main.py
+
+Rendimiento: las vistas se importan solo cuando se abren. Cargar todas por
+adelantado obliga a esperar scikit-learn, Plotly y PySpark antes de mostrar la
+portada, que es justamente donde nadie los necesita.
 """
+import importlib
 import sys
 from pathlib import Path
 
@@ -10,126 +15,96 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st  # noqa: E402
 
-st.set_page_config(page_title="Carro de Paro · SMARTDATA 360", page_icon="🚑", layout="wide")
+st.set_page_config(page_title="Carro de Paro | SMARTDATA 360", page_icon="🚑", layout="wide",
+                   initial_sidebar_state="expanded")
 
 from app import sesion  # noqa: E402
 from app.componentes import estilos, mensaje_pendiente  # noqa: E402
-from app.vistas import (agente, alertas, auditoria, bigdata, catalogo, inventario, ocr,  # noqa: E402
-                        perfil, tablero, usuarios)
-from src.database.connection import base_disponible  # noqa: E402
-from src.seguridad.autenticacion import autenticar, completar_login_mfa  # noqa: E402
 from src.seguridad.mfa import estado_mfa  # noqa: E402
 from src.seguridad.permisos import ROLES, tiene_permiso  # noqa: E402
-from src.servicios.inventario import recalcular_estados  # noqa: E402
 
 estilos()
 
-# (etiqueta, permiso requerido, función de la vista)
+# (etiqueta, permiso requerido, módulo de la vista)
 MENU = [
-    ("Tablero", "dashboard.operativo", tablero.mostrar),
-    ("Inventario", "inventario.ver", inventario.mostrar),
-    ("Lectura OCR", "ocr.usar", ocr.mostrar),
-    ("Alertas", "alertas.ver", alertas.mostrar),
-    ("Agente IA", "agente.usar", agente.mostrar),
-    ("Big Data", "bigdata.ejecutar", bigdata.mostrar),
-    ("Catálogo", "catalogo.gestionar", catalogo.mostrar),
-    ("Usuarios", "usuarios.gestionar", usuarios.mostrar),
-    ("Usuarios", "usuarios.desbloquear", usuarios.mostrar),
-    ("Auditoría y seguridad", "auditoria.ver", auditoria.mostrar),
-    ("Auditoría y seguridad", "seguridad.ver", auditoria.mostrar),
-    ("Mi cuenta", None, perfil.mostrar),
+    ("Tablero", "dashboard.operativo", "tablero"),
+    ("Inventario", "inventario.ver", "inventario"),
+    ("Lectura OCR", "ocr.usar", "ocr"),
+    ("Alertas", "alertas.ver", "alertas"),
+    ("Agente IA", "agente.usar", "agente"),
+    ("Big Data", "bigdata.ejecutar", "bigdata"),
+    ("Catálogo", "catalogo.gestionar", "catalogo"),
+    ("Usuarios", "usuarios.gestionar", "usuarios"),
+    ("Usuarios", "usuarios.desbloquear", "usuarios"),
+    ("Auditoría y seguridad", "auditoria.ver", "auditoria"),
+    ("Auditoría y seguridad", "seguridad.ver", "auditoria"),
+    ("Mi cuenta", None, "perfil"),
 ]
 
 
-def pantalla_login():
-    _, centro, _ = st.columns([1, 1.2, 1])
-    with centro:
-        st.markdown("## 🚑 Carro de Paro")
-        st.caption("SMARTDATA 360 · Control inteligente de medicamentos de reanimación")
-        if "motivo_salida" in st.session_state:
-            st.info(st.session_state.pop("motivo_salida"))
-        if not base_disponible():
-            st.error("No hay conexión con la base de datos. Revise el archivo .env y que MySQL esté activo.")
-            st.stop()
-        with st.form("login"):
-            correo = st.text_input("Correo institucional", placeholder="usuario@hospital.com")
-            password = st.text_input("Contraseña", type="password")
-            entrar = st.form_submit_button("Ingresar", type="primary", width="stretch")
-        if entrar:
-            r = autenticar(correo, password)
-            if r.ok:
-                _ingresar(r.usuario)
-            elif r.requiere_mfa:
-                st.session_state["mfa_pendiente"] = r.usuario      # aún NO es una sesión válida
-                st.rerun()
-            else:
-                st.error(r.mensaje)
-                if r.intentos_restantes is not None and r.intentos_restantes <= 2:
-                    st.warning(f"Intentos restantes antes del bloqueo temporal: {r.intentos_restantes}")
-
-
-def _ingresar(usuario: dict):
-    sesion.iniciar_sesion(usuario)
-    recalcular_estados()   # mantiene estados y alertas al día con la fecha actual
-    st.rerun()
-
-
-def pantalla_segundo_factor(pendiente: dict):
-    _, centro, _ = st.columns([1, 1.2, 1])
-    with centro:
-        st.markdown("## 🔐 Verificación en dos pasos")
-        st.caption(f"Cuenta: {pendiente['correo']}")
-        with st.form("mfa"):
-            codigo = st.text_input("Código de 6 dígitos", max_chars=9,
-                                   help="Tomado de su aplicación de autenticación. También puede usar "
-                                        "uno de sus códigos de respaldo.")
-            verificar = st.form_submit_button("Verificar", type="primary", width="stretch")
-        if verificar:
-            r = completar_login_mfa(pendiente["id"], codigo)
-            if r.ok:
-                _ingresar(r.usuario)
-            else:
-                st.error(r.mensaje)
-                if r.intentos_restantes is not None and r.intentos_restantes <= 2:
-                    st.warning(f"Intentos restantes antes del bloqueo temporal: {r.intentos_restantes}")
-                if not r.requiere_mfa:
-                    st.session_state.pop("mfa_pendiente", None)
-        if st.button("Volver"):
-            st.session_state.pop("mfa_pendiente", None)
-            st.rerun()
+def vista(nombre: str):
+    """Importa la vista en el momento de usarla; Python la deja en caché después."""
+    return importlib.import_module(f"app.vistas.{nombre}")
 
 
 usuario = sesion.usuario_en_sesion()
 if not usuario:
-    if "mfa_pendiente" in st.session_state:
-        pantalla_segundo_factor(st.session_state["mfa_pendiente"])
-    else:
-        pantalla_login()
+    vista("landing").mostrar()   # portada pública: el sistema, el acceso y los documentos legales
     st.stop()
 
 # Cambio obligatorio de contraseña (usuarios nuevos o restablecidos)
 if usuario.get("debe_cambiar_password"):
-    perfil.mostrar(usuario, obligatorio=True)
+    vista("perfil").mostrar(usuario, obligatorio=True)
     st.stop()
 
 # Los roles con permisos críticos deben activar el segundo factor antes de operar
 if estado_mfa(usuario["id"])["pendiente"]:
-    perfil.mostrar(usuario, exigir_mfa=True)
+    vista("perfil").mostrar(usuario, exigir_mfa=True)
+    st.stop()
+
+# Los códigos de respaldo se muestran una sola vez: no se deja continuar sin verlos
+if st.session_state.get("codigos_respaldo"):
+    vista("perfil").mostrar(usuario, mostrar_respaldo=True)
     st.stop()
 
 opciones = {}
-for etiqueta, permiso, vista in MENU:
+for etiqueta, permiso, modulo in MENU:
     if (permiso is None or tiene_permiso(usuario, permiso)) and etiqueta not in opciones:
-        opciones[etiqueta] = vista
+        opciones[etiqueta] = modulo
 
 with st.sidebar:
-    st.markdown(f"**{usuario['nombre']}**")
-    st.caption(ROLES.get(usuario["rol"], (usuario["rol"],))[0])
+    st.markdown(f'<div class="identidad"><b>SMARTDATA 360</b><span>carro de paro</span></div>'
+                f'<div class="usuario">{usuario["nombre"]}<span>'
+                f'{ROLES.get(usuario["rol"], (usuario["rol"],))[0]}</span></div>',
+                unsafe_allow_html=True)
     eleccion = st.radio("Menú", list(opciones), label_visibility="collapsed")
-    st.divider()
+    st.markdown('<div class="pie-lateral"></div>', unsafe_allow_html=True)
     if st.button("Cerrar sesión", width="stretch"):
         sesion.cerrar_sesion(registrar=True)
         st.rerun()
+    with st.expander("Documentos"):
+        from app import legal
+        for clave, etiqueta in legal.DOCUMENTOS.items():
+            if st.button(etiqueta, key=f"nav_legal_{clave}", width="stretch"):
+                st.session_state["legal_interno"] = clave
+                st.rerun()
+
+# Si la burbuja pidió abrir el asistente completo, se cambia de pantalla
+if st.session_state.pop("ir_a_agente", False) and "Agente IA" in opciones:
+    eleccion = "Agente IA"
 
 mensaje_pendiente()
-opciones[eleccion](usuario)
+if st.session_state.get("legal_interno"):
+    from app import legal
+    if st.button("Volver a la aplicación"):
+        st.session_state.pop("legal_interno")
+        st.rerun()
+    st.markdown(f'<div class="documento">{legal.CUERPOS[st.session_state["legal_interno"]]}</div>',
+                unsafe_allow_html=True)
+else:
+    vista(opciones[eleccion]).mostrar(usuario)
+
+# El asistente queda a mano en todas las pantallas, salvo en la suya propia
+if eleccion != "Agente IA" and not st.session_state.get("legal_interno"):
+    from app import burbuja
+    burbuja.mostrar(usuario)

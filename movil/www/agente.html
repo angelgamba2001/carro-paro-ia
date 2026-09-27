@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="color-scheme" content="light">
+<title>Asistente · Carro de Paro</title>
+<link rel="stylesheet" href="css/tema.css">
+</head>
+<body>
+
+<header class="cabecera" id="cabecera"></header>
+
+<main class="contenido">
+  <div id="avisos"></div>
+
+  <div class="atajos">
+    <button type="button" data-p="Dame un resumen del estado de los carros">Estado general</button>
+    <button type="button" data-p="¿Qué carros tienen medicamentos críticos bajo el mínimo?">Faltantes críticos</button>
+    <button type="button" data-p="¿Qué medicamentos vencen en los próximos 30 días?">Vencimientos</button>
+    <button type="button" data-p="Dame la orden de reposición consolidada">Qué pedir</button>
+  </div>
+
+  <div class="conversacion" id="conversacion"></div>
+
+  <form id="form-pregunta">
+    <div class="campo" style="margin-bottom:.5rem">
+      <input type="text" id="pregunta" placeholder="Escriba su pregunta"
+             autocomplete="off" maxlength="1000">
+    </div>
+    <button type="submit" class="primario" id="btn-enviar">Preguntar</button>
+  </form>
+
+  <p class="nota">El asistente solo consulta con las herramientas que su perfil tiene
+    permitidas, y cada consulta queda en el registro de auditoría.</p>
+</main>
+
+<nav class="barra-inferior" id="navegacion"></nav>
+
+<script src="cordova.js"></script>
+<script src="js/api.js"></script>
+<script>
+(function () {
+  'use strict';
+  if (!UI.exigirSesion()) return;
+  UI.cabecera('Asistente', 'Pregunte en español');
+  UI.navegacion('agente');
+
+  const conversacion = document.getElementById('conversacion');
+  let ocupado = false;
+
+  function burbuja(texto, mia, usadas) {
+    const div = document.createElement('div');
+    div.className = 'burbuja ' + (mia ? 'mia' : 'suya');
+    div.textContent = texto;
+    if (usadas && usadas.length) {
+      const pie = document.createElement('span');
+      pie.className = 'usadas';
+      pie.textContent = 'Consultó: ' + usadas.join(', ');
+      div.appendChild(pie);
+    }
+    conversacion.appendChild(div);
+    div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    return div;
+  }
+
+  async function preguntar(texto) {
+    if (ocupado || !texto.trim()) return;
+    ocupado = true;
+    const boton = document.getElementById('btn-enviar');
+    boton.disabled = true; boton.textContent = 'Consultando…';
+    document.getElementById('avisos').innerHTML = '';
+    burbuja(texto, true);
+    const esperando = burbuja('Consultando…', false);
+    try {
+      const r = await API.preguntarAgente(texto);
+      // La web añade una firma al final de la respuesta; en el móvil sobra
+      const limpia = String(r.respuesta || '').split('\n\n_Respuesta generada')[0];
+      esperando.textContent = limpia;
+      if (r.herramientas_usadas && r.herramientas_usadas.length) {
+        const pie = document.createElement('span');
+        pie.className = 'usadas';
+        pie.textContent = 'Consultó: ' + r.herramientas_usadas.join(', ');
+        esperando.appendChild(pie);
+      }
+    } catch (err) {
+      esperando.remove();
+      UI.aviso('avisos', err.message);
+    } finally {
+      ocupado = false;
+      boton.disabled = false; boton.textContent = 'Preguntar';
+    }
+  }
+
+  document.getElementById('form-pregunta').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const campo = document.getElementById('pregunta');
+    const texto = campo.value.trim();
+    campo.value = '';
+    preguntar(texto);
+  });
+
+  document.querySelectorAll('.atajos button').forEach((b) =>
+    b.addEventListener('click', () => preguntar(b.dataset.p)));
+})();
+</script>
+</body>
+</html>
