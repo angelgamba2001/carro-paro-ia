@@ -50,6 +50,11 @@ notepad .env        # poner DB_USER, DB_PASSWORD y un JWT_SECRETO propio
 python verificar_entorno.py
 ```
 
+Antes de crear la base, `verificar_entorno.py` dirá que MySQL responde pero que `carro_paro_db`
+todavía no existe: es lo esperado en una instalación nueva. Si en cambio reporta un error de
+conexión, `python diagnostico_mysql.py` muestra el número de error de MySQL y qué hacer en cada
+caso (clave equivocada, servicio detenido, puerto distinto).
+
 ### Java para Spark (opcional pero recomendado)
 1. Instalar **Eclipse Temurin JDK 17** (adoptium.net), marcando la opción *Set JAVA_HOME*.
 2. Cerrar y abrir PowerShell, y comprobar con `java -version`.
@@ -64,11 +69,14 @@ python verificar_entorno.py
 python scripts/inicializar_bd.py              # los usuarios deberán cambiar la clave al entrar
 # python scripts/inicializar_bd.py --sin-cambio   # para demostraciones
 
-# Si ya tenía la base creada, aplique las migraciones sin perder datos:
-python scripts/migrar_mfa.py                  # segundo factor
-python scripts/migrar_consentimientos.py      # registro de aceptación de políticas
-python scripts/migrar_correo.py               # código por correo e identidad de Microsoft
-python scripts/migrar_registro.py             # registro de usuarios por cuenta propia
+# El esquema de 'base de datos/carro_paro_db.sql' no trae las columnas de MFA por correo,
+# SSO y registro propio: las aportan los scripts migrar_*.py, e inicializar_bd.py ya los
+# ejecuta por usted. Sin ellas el inicio de sesión falla con 'Unknown column mfa_correo_activo'.
+# Sobre una base ya existente puede aplicarlos por separado; son idempotentes:
+# python scripts/migrar_mfa.py                 # segundo factor
+# python scripts/migrar_consentimientos.py     # registro de aceptación de políticas
+# python scripts/migrar_correo.py              # código por correo e identidad de Microsoft
+# python scripts/migrar_registro.py            # registro de usuarios por cuenta propia
 
 # b) Generar el histórico legado (5 años, ~420 mil registros) en data/raw
 python scripts/generar_historico.py --anios 5
@@ -84,6 +92,11 @@ uvicorn api.main:app --reload --port 8000       # documentación: http://localho
 ```
 
 Con Docker (sin instalar nada más): `copy .env.example .env` y luego `docker compose up --build`.
+El MySQL del contenedor usa su propia clave (`DOCKER_DB_PASSWORD`, por defecto `carro_paro_local`)
+y se publica en el puerto **3307**, para no chocar con un MySQL instalado en la máquina; el
+`DB_PASSWORD` del `.env` queda para la instalación nativa. Si un intento anterior falló a
+medias, ejecute `docker compose down -v` antes de reintentar: MySQL solo se inicializa sobre
+un volumen vacío.
 
 ### Usuarios de demostración
 Contraseña inicial de todos: **`Carro#Paro2026`**

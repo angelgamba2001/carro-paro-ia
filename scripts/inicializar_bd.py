@@ -8,6 +8,7 @@ Contraseña inicial de todos los usuarios demo: la de --password (por defecto Ca
 """
 import argparse
 import random
+import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -125,6 +126,31 @@ def cargar_datos(password: str, exigir_cambio: bool, semilla: int = 2026):
     conn.close()
 
 
+# Columnas y tablas que el esquema .sql no contiene y que la aplicacion necesita
+# para funcionar (segundo factor por correo, SSO y registro propio). Son
+# idempotentes: cada script comprueba antes de crear.
+MIGRACIONES = [
+    "migrar_mfa.py",
+    "migrar_consentimientos.py",
+    "migrar_correo.py",
+    "migrar_registro.py",
+]
+
+
+def aplicar_migraciones():
+    """Completa el esquema con lo que vive en los scripts de migracion.
+
+    Sin esto, una instalacion nueva arranca sin las columnas de MFA por correo
+    y el inicio de sesion falla con 'Unknown column mfa_correo_activo'.
+    """
+    carpeta = Path(__file__).resolve().parent
+    for script in MIGRACIONES:
+        print(f"\n--- {script} ---")
+        r = subprocess.run([sys.executable, str(carpeta / script)])
+        if r.returncode != 0:
+            sys.exit(f"La migracion {script} fallo. El esquema quedo incompleto.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--password", default="Carro#Paro2026")
@@ -136,6 +162,7 @@ def main():
         sys.exit("La contraseña demo no cumple la política: " + " ".join(errores))
     if not a.sin_esquema:
         crear_esquema()
+    aplicar_migraciones()
     cargar_datos(a.password, exigir_cambio=not a.sin_cambio)
 
     from src.servicios.inventario import recalcular_estados

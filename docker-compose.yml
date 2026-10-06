@@ -1,15 +1,20 @@
 # Levanta todo el sistema:   docker compose up --build
 #   Web:  http://localhost:8501     API: http://localhost:8000/docs
 # La primera vez el servicio "inicializador" crea la BD, genera el histórico y ejecuta el pipeline.
+#
+# La clave del MySQL de este compose NO sale de DB_PASSWORD: esa variable apunta al
+# MySQL que cada quien tenga instalado, y cuando queda vacía en el .env el contenedor
+# de MySQL se niega a arrancar. Aquí se usa DOCKER_DB_PASSWORD, que no está en
+# .env.example y por tanto siempre toma el valor por defecto de abajo.
 services:
   mysql:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-carro_paro_local}
+      MYSQL_ROOT_PASSWORD: ${DOCKER_DB_PASSWORD:-carro_paro_local}
     ports: ["3307:3306"]
     volumes: [mysql_datos:/var/lib/mysql]
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_PASSWORD:-carro_paro_local}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DOCKER_DB_PASSWORD:-carro_paro_local}"]
       interval: 5s
       retries: 30
 
@@ -20,7 +25,7 @@ services:
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: root
-      DB_PASSWORD: ${DB_PASSWORD:-carro_paro_local}
+      DB_PASSWORD: ${DOCKER_DB_PASSWORD:-carro_paro_local}
     depends_on: {mysql: {condition: service_healthy}}
     volumes: [datalake:/app/data]
     command: >
