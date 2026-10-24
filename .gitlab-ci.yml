@@ -1,0 +1,21 @@
+stages:
+  - build
+  - test
+  - deploy
+
+build-job:
+  stage: build
+  script:
+    - echo "Preparando artefactos..."
+
+test-job:
+  stage: test
+  script:
+    - echo "Ejecutando pruebas de integridad..."
+
+deploy-job:
+  stage: deploy
+  script:
+    - echo "Despliegue exitoso en produccion"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
