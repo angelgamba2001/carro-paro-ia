@@ -209,15 +209,20 @@ def recalcular_estados() -> dict:
                        WHERE estado = 'vigente' AND fecha_vencimiento <= DATE_ADD(CURDATE(), INTERVAL %s DAY)""",
                     (dias,))
         proximos = cur.rowcount
-        for tipo, estado, severidad in (("VENCIDO", "vencido", "ALTA"), ("PROXIMO_VENCER", "proximo_a_vencer", "MEDIA")):
-            cur.execute(f"""
+        # Bandit B608: los valores venian de una tupla literal y no del usuario, pero
+        # construir SQL por interpolacion no debe quedar en el codigo. Se parametriza.
+        # Al pasar parametros, mysql-connector trata '%' como marcador: por eso el
+        # formato de fecha pasa a escribirse '%%Y-%%m-%%d'.
+        for tipo, estado, severidad in (("VENCIDO", "vencido", "ALTA"),
+                                        ("PROXIMO_VENCER", "proximo_a_vencer", "MEDIA")):
+            cur.execute("""
                 INSERT INTO alertas (inventario_id, carro_id, medicamento_id, tipo, severidad, mensaje)
-                SELECT i.id, i.carro_id, i.medicamento_id, '{tipo}', '{severidad}',
-                       CONCAT('Lote ', i.lote, ' vence el ', DATE_FORMAT(i.fecha_vencimiento, '%Y-%m-%d'))
+                SELECT i.id, i.carro_id, i.medicamento_id, %s, %s,
+                       CONCAT('Lote ', i.lote, ' vence el ', DATE_FORMAT(i.fecha_vencimiento, '%%Y-%%m-%%d'))
                 FROM inventario_carro i
-                WHERE i.estado = '{estado}' AND i.cantidad > 0
-                  AND NOT EXISTS (SELECT 1 FROM alertas a WHERE a.inventario_id = i.id AND a.tipo = '{tipo}')
-            """)
+                WHERE i.estado = %s AND i.cantidad > 0
+                  AND NOT EXISTS (SELECT 1 FROM alertas a WHERE a.inventario_id = i.id AND a.tipo = %s)
+            """, (tipo, severidad, estado, tipo))
         cur.close()
     stock = generar_alertas_stock()
     return {"vencidos": vencidos, "proximos": proximos, "alertas_stock": stock}

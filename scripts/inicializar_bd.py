@@ -43,7 +43,7 @@ def crear_esquema():
 
 
 def cargar_datos(password: str, exigir_cambio: bool, semilla: int = 2026):
-    rng = random.Random(semilla)
+    rng = random.Random(semilla)  # nosec B311 - datos de demostracion, no credenciales
     conn = mysql.connector.connect(host=config.DB_HOST, port=config.DB_PORT, user=config.DB_USER,
                                    password=config.DB_PASSWORD, database=config.DB_NAME)
     cur = conn.cursor()
@@ -134,6 +134,7 @@ MIGRACIONES = [
     "migrar_consentimientos.py",
     "migrar_correo.py",
     "migrar_registro.py",
+    "migrar_visitante.py",
 ]
 
 
@@ -151,12 +152,41 @@ def aplicar_migraciones():
             sys.exit(f"La migracion {script} fallo. El esquema quedo incompleto.")
 
 
+def base_poblada() -> bool:
+    """¿La base ya existe y tiene usuarios?
+
+    Sirve para que un arranque posterior no vuelva a ejecutar crear_esquema(), que
+    empieza con DROP DATABASE: eso borraba en cada inicio los secretos del segundo
+    factor, el inventario registrado y todo lo que el usuario hubiera hecho.
+    """
+    try:
+        conn = mysql.connector.connect(host=config.DB_HOST, port=config.DB_PORT,
+                                       user=config.DB_USER, password=config.DB_PASSWORD,
+                                       database=config.DB_NAME)
+    except mysql.connector.Error:
+        return False                      # la base todavía no existe
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM usuarios")
+        return cur.fetchone()[0] > 0
+    except mysql.connector.Error:
+        return False                      # existe pero sin esquema
+    finally:
+        conn.close()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--password", default="Carro#Paro2026")
     ap.add_argument("--sin-cambio", action="store_true", help="No exigir cambio de contraseña al primer ingreso")
     ap.add_argument("--sin-esquema", action="store_true", help="No recrear el esquema (ya existe y está vacío)")
+    ap.add_argument("--solo-si-vacia", action="store_true",
+                    help="No hacer nada si la base ya existe y tiene usuarios (arranques posteriores)")
     a = ap.parse_args()
+    if a.solo_si_vacia and base_poblada():
+        print("= La base ya existe y tiene usuarios: no se recrea.")
+        print("  Para empezar de cero: docker compose down -v, o ejecute este script sin --solo-si-vacia.")
+        return
     errores = validar_politica(a.password)
     if errores:
         sys.exit("La contraseña demo no cumple la política: " + " ".join(errores))

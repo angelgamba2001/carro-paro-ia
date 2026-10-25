@@ -109,3 +109,35 @@ def test_agente_informa_herramientas_no_permitidas():
     paso = p.siguiente_paso("hay riesgo de desabastecimiento", [], [_h("resumen_inventario")])
     assert paso.llamadas[0][0] == "resumen_inventario"
     assert "predecir_desabastecimiento" in p.denegadas
+
+
+# ---------------- Visitante, login y MFA ----------------
+def test_login_rechaza_caracteres_distintos():
+    from src.seguridad.correos import login_valido
+    for bueno in ("admin", "ana.perez@hospital.co", "user_1+x-y"):
+        assert login_valido(bueno)
+    for malo in ("admin'--", "a b", "x;drop", "<script>", "ñandú", "a\"b", "", "a" * 300):
+        assert not login_valido(malo)
+
+
+def test_visitante_solo_ve_modulos_asignados():
+    from src.seguridad.permisos import permisos_de_usuario, vista_permitida
+    sin = {"rol": "VISITANTE", "modulos": ""}
+    assert permisos_de_usuario(sin) == set()
+    solo_tablero = {"rol": "VISITANTE", "modulos": "tablero"}
+    assert vista_permitida(solo_tablero, "tablero")
+    assert not vista_permitida(solo_tablero, "usuarios")
+    assert not vista_permitida(solo_tablero, "inventario")
+    assert not any(p.endswith((".editar", ".crear", ".eliminar")) for p in permisos_de_usuario(solo_tablero))
+
+
+def test_visitante_modulo_inventado_sin_permisos():
+    from src.seguridad.permisos import permisos_de_usuario
+    assert permisos_de_usuario({"rol": "VISITANTE", "modulos": "admin,nan"}) == set()
+
+
+def test_mfa_obligatorio_para_roles_administrativos():
+    from src.seguridad.mfa import mfa_obligatorio
+    for rol in ("ADMIN", "TI", "OFICIAL_SEGURIDAD", "DIRECCION_MEDICA", "REGENTE_FARMACIA"):
+        assert mfa_obligatorio(rol)
+    assert not mfa_obligatorio("VISITANTE")

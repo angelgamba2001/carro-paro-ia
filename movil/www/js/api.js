@@ -17,7 +17,11 @@ const API = (() => {
   // Dirección del servidor. Ver movil/README.md: el teléfono NO alcanza el
   // localhost del computador; hay que poner la IP de red o usar adb reverse.
   // ------------------------------------------------------------------
-  const POR_DEFECTO = 'http://192.168.1.12:8000';
+  // Semgrep url-de-api-fija-en-codigo: una IP fija obliga a recompilar para cambiar
+  // de servidor. Si la app se sirve por http(s) tomamos el propio origen; en el
+  // WebView de Cordova (file://) no hay origen util y la direccion se indica en la
+  // pantalla de ajustes, que ya existe y la guarda en LLAVE_URL.
+  const POR_DEFECTO = /^https?:$/.test(location.protocol) ? location.origin : '';
 
   const LLAVE_URL = 'cp_api_url';
   const LLAVE_TOKEN = 'cp_token';

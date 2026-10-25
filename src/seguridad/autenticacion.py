@@ -2,15 +2,19 @@
 Autenticación con bloqueo por intentos fallidos (heredado de SGHCU: 5 intentos / 15 min).
 Mensajes genéricos hacia el usuario; el detalle queda en eventos_seguridad.
 """
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from src import config
 from src.database.auditoria import registrar_evento_seguridad
 from src.database.connection import consultar, ejecutar
+from src.seguridad import correos
 from src.seguridad.contrasenas import hash_password, validar_politica, verificar_password
 
 MENSAJE_GENERICO = "Correo o contraseña incorrectos."
+
+log = logging.getLogger(__name__)
 
 
 def avisar_bloqueo(usuario_id: int, motivo: str):
@@ -19,10 +23,31 @@ def avisar_bloqueo(usuario_id: int, motivo: str):
         from src.servicios.avisos import cuenta_bloqueada
         cuenta_bloqueada(usuario_id, motivo)
     except Exception:                                     # noqa: BLE001
-        pass
+        # Bandit B110: descartar la excepcion dejaba sin rastro un fallo del canal
+        # de correo. El aviso sigue siendo accesorio y no interrumpe el ingreso.
+        log.warning("No se pudo avisar del bloqueo al usuario %s", usuario_id, exc_info=True)
 
-_CAMPOS = ("id, nombre, correo, rol, activo, password_hash, intentos_fallidos, "
-           "bloqueado_hasta, debe_cambiar_password")
+_CAMPOS_BASE = ("id, nombre, correo, rol, activo, password_hash, intentos_fallidos, "
+                "bloqueado_hasta, debe_cambiar_password")
+_modulos_listos = False
+
+
+def hay_columna_modulos() -> bool:
+    """¿Ya se aplicó scripts/migrar_visitante.py? Solo se recuerda el sí: mientras
+    falte, se vuelve a preguntar, y así basta ejecutar la migración sin reiniciar."""
+    global _modulos_listos
+    if not _modulos_listos:
+        _modulos_listos = bool(consultar(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() "
+            "AND table_name = 'usuarios' AND column_name = 'modulos'", uno=True))
+    return _modulos_listos
+
+
+def _campos() -> str:
+    """Columnas que se leen del usuario. `modulos` entra solo cuando la migración ya la
+    creó: una base sin migrar sigue dejando entrar en vez de fallar con «Unknown column».
+    Son siempre literales fijos de este módulo, nunca texto que escriba el usuario."""
+    return _CAMPOS_BASE + (", modulos" if hay_columna_modulos() else "")
 
 
 @dataclass
@@ -37,15 +62,27 @@ class ResultadoLogin:
 
 def _publico(u: dict) -> dict:
     """Datos del usuario que pueden viajar en sesión/token (sin hash)."""
-    return {k: u[k] for k in ("id", "nombre", "correo", "rol", "activo", "debe_cambiar_password")}
+    publico = {k: u[k] for k in ("id", "nombre", "correo", "rol", "activo", "debe_cambiar_password")}
+    publico["modulos"] = u.get("modulos")      # solo lo usan las cuentas VISITANTE
+    return publico
 
 
 def autenticar(correo: str, password: str, origen: str = "WEB") -> ResultadoLogin:
     correo = (correo or "").strip().lower()
     if not correo or not password:
         return ResultadoLogin(False, mensaje=MENSAJE_GENERICO)
+    # El campo de usuario solo admite los caracteres de un correo. Se rechaza ANTES de
+    # tocar la base de datos, y en el registro de seguridad NO se guarda lo escrito:
+    # es justo el texto que alguien armó para probar el sistema.
+    if not correos.login_valido(correo):
+        registrar_evento_seguridad("LOGIN_FALLIDO", None, detalle="Caracteres no permitidos en el usuario",
+                                   origen=origen)
+        return ResultadoLogin(False, mensaje=correos.MENSAJE_LOGIN_CARACTERES)
 
-    u = consultar(f"SELECT {_CAMPOS} FROM usuarios WHERE correo = %s", (correo,), uno=True)
+    # Falso positivo B608: lo interpolado es la constante _CAMPOS (lista fija de columnas).
+    # El dato del usuario viaja parametrizado en %s, no concatenado.
+    u = consultar(f"SELECT {_campos()} FROM usuarios WHERE correo = %s",  # nosec B608
+                  (correo,), uno=True)
     if not u:
         registrar_evento_seguridad("LOGIN_FALLIDO", correo, detalle="Usuario inexistente", origen=origen)
         return ResultadoLogin(False, mensaje=MENSAJE_GENERICO)
@@ -122,7 +159,9 @@ def completar_login_mfa(usuario_id: int, codigo: str, origen: str = "WEB") -> Re
     """Segundo paso del ingreso: valida el código, sea de la aplicación de
     autenticación, de respaldo o el enviado al correo.
     Los intentos fallidos cuentan para el mismo bloqueo que la contraseña."""
-    u = consultar(f"SELECT {_CAMPOS} FROM usuarios WHERE id = %s", (usuario_id,), uno=True)
+    # Falso positivo B608: igual que arriba, _CAMPOS es una constante del modulo.
+    u = consultar(f"SELECT {_campos()} FROM usuarios WHERE id = %s",  # nosec B608
+                  (usuario_id,), uno=True)
     if not u or not u["activo"]:
         return ResultadoLogin(False, mensaje=MENSAJE_GENERICO)
     ahora = datetime.now()
@@ -153,7 +192,9 @@ def completar_login_mfa(usuario_id: int, codigo: str, origen: str = "WEB") -> Re
 def revalidar_usuario(usuario_id: int) -> dict | None:
     """Defensa en profundidad: relee rol/estado desde la BD en cada solicitud.
     Si un admin desactiva o cambia el rol, la sesión abierta pierde los privilegios de inmediato."""
-    u = consultar(f"SELECT {_CAMPOS} FROM usuarios WHERE id = %s", (usuario_id,), uno=True)
+    # Falso positivo B608: igual que arriba, _CAMPOS es una constante del modulo.
+    u = consultar(f"SELECT {_campos()} FROM usuarios WHERE id = %s",  # nosec B608
+                  (usuario_id,), uno=True)
     if not u or not u["activo"]:
         return None
     return _publico(u)
@@ -175,5 +216,8 @@ def cambiar_password(usuario_id: int, actual: str, nueva: str) -> list[str]:
         from src.servicios.avisos import password_cambiada
         password_cambiada(usuario_id, "el cambio desde su perfil")
     except Exception:                                     # noqa: BLE001
-        pass
+        # Bandit B110: el cambio de contrasena ya esta hecho; solo fallo el aviso,
+        # pero debe quedar registrado para poder auditarlo.
+        log.warning("No se pudo avisar del cambio de contrasena al usuario %s",
+                    usuario_id, exc_info=True)
     return []

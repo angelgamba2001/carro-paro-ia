@@ -1,11 +1,17 @@
 # Levanta todo el sistema:   docker compose up --build
 #   Web:  http://localhost:8501     API: http://localhost:8000/docs
-# La primera vez el servicio "inicializador" crea la BD, genera el histórico y ejecuta el pipeline.
+# La primera vez el servicio "inicializador" crea la BD, aplica las migraciones,
+# genera el histórico y ejecuta el pipeline.
 #
 # La clave del MySQL de este compose NO sale de DB_PASSWORD: esa variable apunta al
 # MySQL que cada quien tenga instalado, y cuando queda vacía en el .env el contenedor
 # de MySQL se niega a arrancar. Aquí se usa DOCKER_DB_PASSWORD, que no está en
 # .env.example y por tanto siempre toma el valor por defecto de abajo.
+#
+# Los tres servicios de Python comparten UNA sola imagen (carro-paro-ia:local).
+# Antes cada uno declaraba "build: ." y Docker construía la misma imagen tres
+# veces en paralelo: tres "pip install" simultáneos de PySpark agotaban la
+# memoria de la máquina virtual y el constructor moría con "rpc error ... EOF".
 services:
   mysql:
     image: mysql:8.0
@@ -13,37 +19,83 @@ services:
       MYSQL_ROOT_PASSWORD: ${DOCKER_DB_PASSWORD:-carro_paro_local}
     ports: ["3307:3306"]
     volumes: [mysql_datos:/var/lib/mysql]
+    # "-h localhost" hacía que mysqladmin usara el socket Unix. La primera vez,
+    # la imagen de MySQL levanta un servidor TEMPORAL que solo escucha por
+    # socket (--skip-networking); la comprobación lo daba por sano y el
+    # inicializador se conectaba por TCP antes de que existiera el servidor
+    # definitivo: "Errno 111: Connection refused". Con --protocol=TCP contra
+    # 127.0.0.1 la comprobación solo pasa cuando el servidor real acepta
+    # conexiones de red, que es lo que necesita mysql-connector desde fuera.
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DOCKER_DB_PASSWORD:-carro_paro_local}"]
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 --protocol=TCP -u root -p"$$MYSQL_ROOT_PASSWORD" --silent']
       interval: 5s
-      retries: 30
+      timeout: 5s
+      retries: 40
+      start_period: 40s
 
+  # Único servicio que construye la imagen; web y api la reutilizan tal cual.
   inicializador:
     build: .
+    image: carro-paro-ia:local
     env_file: .env
     environment: &entorno
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: root
       DB_PASSWORD: ${DOCKER_DB_PASSWORD:-carro_paro_local}
+      # Ollama corre en Windows, fuera de la red de contenedores: aquí dentro
+      # "localhost" es el propio contenedor y la conexión se rechaza, con lo que
+      # el agente degrada al motor de reglas sin avisar. host.docker.internal
+      # apunta al equipo anfitrión. Valor literal a propósito: si se usara
+      # ${LLM_URL} volvería a entrar el "localhost" del .env, que es el correcto
+      # cuando la aplicación se ejecuta fuera de Docker.
+      # Requiere además que Ollama escuche en 0.0.0.0 (variable OLLAMA_HOST).
+      LLM_URL: http://host.docker.internal:11434/v1
     depends_on: {mysql: {condition: service_healthy}}
     volumes: [datalake:/app/data]
+    # El esquema de "base de datos/carro_paro_db.sql" no trae las columnas que
+    # añadieron el correo institucional y el registro por cuenta propia (estado,
+    # correo_verificado, mfa_correo_*, ms_oid...). Sin las migraciones el login
+    # falla contra una columna inexistente. Las cuatro son idempotentes:
+    # comprueban information_schema antes de tocar nada.
+    # --solo-si-vacia: en el primer arranque crea el esquema y carga los datos de
+    # demostración; en los siguientes no toca nada. Sin esa bandera, crear_esquema()
+    # ejecuta DROP DATABASE en cada inicio y se perdían los secretos del segundo
+    # factor, el inventario registrado y cualquier cambio del usuario.
+    # Las guardas sobre data/raw y data/gold evitan regenerar el histórico y
+    # reejecutar el pipeline cuando el data lake ya está construido.
     command: >
-      sh -c "python scripts/inicializar_bd.py --sin-cambio &&
-             python scripts/generar_historico.py --anios 5 &&
-             python scripts/ejecutar_pipeline.py"
+      sh -c "python scripts/inicializar_bd.py --sin-cambio --solo-si-vacia &&
+             python scripts/migrar_mfa.py &&
+             python scripts/migrar_consentimientos.py &&
+             python scripts/migrar_correo.py &&
+             python scripts/migrar_registro.py &&
+             { [ -d data/raw/revisiones ] || python scripts/generar_historico.py --anios 5 ; } &&
+             { [ -f data/gold/_ultima_ejecucion.json ] || python scripts/ejecutar_pipeline.py ; }"
 
   web:
-    build: .
+    image: carro-paro-ia:local
+    pull_policy: never      # la imagen es local: no buscarla nunca en un registro
+    extra_hosts: ["host.docker.internal:host-gateway"]
     env_file: .env
     environment: *entorno
     depends_on: {inicializador: {condition: service_completed_successfully}}
-    volumes: [datalake:/app/data]
+    volumes:
+      - datalake:/app/data
+      # El modelo Whisper "small" (~460 MB) lo descarga faster-whisper la primera
+      # vez que alguien usa el micrófono. Sin este volumen se volvería a bajar
+      # cada vez que se recrea el contenedor.
+      - hf_cache:/root/.cache/huggingface
+      # Modelos de detección y reconocimiento de EasyOCR (~100 MB), por el mismo
+      # motivo: se bajan una vez y no en cada recreación del contenedor.
+      - easyocr_cache:/root/.EasyOCR
     ports: ["8501:8501"]
     command: streamlit run app/main.py --server.address 0.0.0.0 --server.port 8501
 
   api:
-    build: .
+    image: carro-paro-ia:local
+    pull_policy: never
+    extra_hosts: ["host.docker.internal:host-gateway"]
     env_file: .env
     environment: *entorno
     depends_on: {inicializador: {condition: service_completed_successfully}}
@@ -54,3 +106,5 @@ services:
 volumes:
   mysql_datos:
   datalake:
+  hf_cache:
+  easyocr_cache:

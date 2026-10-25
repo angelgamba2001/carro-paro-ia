@@ -214,3 +214,69 @@ APP = """
 .documento td { padding: .5rem .8rem .5rem 0; border-bottom: 1px solid var(--linea);
                 vertical-align: top; color: var(--tinta-suave); }
 """
+
+# --- Ajustes para pantallas pequeñas --------------------------------------
+# La aplicación se diseñó para un escritorio ancho: seis indicadores en fila,
+# tablas de muchas columnas y barra lateral siempre visible. En un celular eso
+# se traduce en texto diminuto y desplazamiento horizontal. Aquí se reordena
+# para el pulgar SIN cambiar el lenguaje visual: misma paleta, mismas reglas
+# rojas, mismas esquinas rectas. Solo cambian densidad y áreas de toque.
+MOVIL = """
+/* --- Tabletas y celulares en horizontal -------------------------------- */
+@media (max-width: 900px) {
+  /* st.columns reparte el ancho aunque no quepa: seis indicadores en 800 px
+     dan cinco caracteres por celda. Se les permite saltar de línea con un
+     ancho mínimo legible en lugar de comprimirse. */
+  [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: .6rem; }
+  [data-testid="stHorizontalBlock"] > div { flex: 1 1 220px; min-width: 220px; }
+}
+
+/* --- Celulares ---------------------------------------------------------- */
+@media (max-width: 640px) {
+  .block-container { padding-top: .9rem; padding-left: 1rem; padding-right: 1rem; }
+
+  .cabecera { gap: .3rem; margin-bottom: 1rem; padding-bottom: .35rem; }
+  .cabecera .titulo { font-size: 1.35rem; }
+  .cabecera span { font-size: .87rem; }
+
+  /* Un indicador por fila: la cifra se lee de un vistazo, que es su función */
+  [data-testid="stHorizontalBlock"] > div { flex: 1 1 100%; min-width: 0; }
+  .kpi { padding: .7rem .8rem .75rem; }
+  .kpi .v { font-size: 1.35rem; }
+
+  /* La altura fija servía para igualar tarjetas en una cuadrícula; apiladas sobra */
+  .carro { min-height: 0; }
+  .seccion { margin-top: 1.2rem; font-size: .98rem; }
+
+  /* «SMARTDATA 360» no cabe en una línea a 360 px */
+  .identidad b { white-space: normal; }
+
+  /* Que se desplace la tabla, no la página entera */
+  [data-testid="stDataFrame"] { max-width: 100%; }
+  .documento table { display: block; overflow-x: auto; }
+  .documento p, .documento li { font-size: .92rem; line-height: 1.65; }
+
+  /* Pestañas: pasarlas con el dedo en vez de amontonarlas */
+  [data-testid="stTabs"] [data-baseweb="tab-list"] {
+    gap: 1rem; overflow-x: auto; scrollbar-width: none;
+  }
+  [data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar { display: none; }
+}
+
+/* --- Pantallas táctiles (celular y tableta, cualquier ancho) ------------ */
+@media (hover: none) and (pointer: coarse) {
+  /* Área mínima de toque 44 px. Las opciones del menú tenían .1rem de relleno,
+     pensadas para la precisión de un puntero. */
+  [data-testid="stSidebar"] [role="radiogroup"] label {
+    padding: .55rem 0; min-height: 44px; align-items: center;
+  }
+  [data-testid="stSidebar"] .stButton button { min-height: 44px; }
+
+  /* Safari en iOS amplía la página al enfocar un campo de menos de 16 px, y el
+     tema usa 15. Se sube solo en táctil para no engordar el escritorio. */
+  input, textarea, select { font-size: 16px !important; }
+
+  /* Sin puntero no hay "hover": el desplazamiento de la etiqueta solo estorba */
+  .carro:hover { transform: none; }
+}
+"""

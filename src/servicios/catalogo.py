@@ -7,7 +7,10 @@ from src.servicios.errores import ErrorNegocio
 
 
 def listar_medicamentos(solo_activos: bool = True) -> list[dict]:
-    sql = "SELECT * FROM cat_medicamentos" + (" WHERE activo = 1" if solo_activos else "") + " ORDER BY nombre"
+    # Falso positivo B608: los tres fragmentos son literales y lo unico variable
+    # es un booleano que elige entre dos de ellos; ninguna entrada del usuario alcanza
+    # la consulta. Reescribirla no reduciria ningun riesgo.
+    sql = "SELECT * FROM cat_medicamentos" + (" WHERE activo = 1" if solo_activos else "") + " ORDER BY nombre"  # nosec B608
     return consultar(sql)
 
 

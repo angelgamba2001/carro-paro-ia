@@ -1,18 +1,50 @@
 """Verifica que el entorno tenga lo necesario. Uso: python verificar_entorno.py"""
 import importlib
 import shutil
-import subprocess
+import subprocess  # nosec B404 - se usa con lista fija, sin shell y con ruta resuelta por shutil.which
 import sys
 
 print(f"Python {sys.version.split()[0]}", "✔" if (3, 10) <= sys.version_info[:2] <= (3, 12) else
       "⚠ se recomienda 3.10–3.12 (PySpark 3.5)")
-for mod in ["streamlit", "plotly", "fastapi", "uvicorn", "mysql.connector", "bcrypt", "jwt", "pandas",
-            "pyarrow", "sklearn", "pyspark", "xlsxwriter", "dotenv"]:
+# Se importa el submódulo que el proyecto usa realmente, no solo el paquete raíz.
+# `import sklearn` funciona aunque `sklearn.ensemble` esté roto: los módulos
+# compilados (.pyd) solo se cargan al entrar en el submódulo, y son justo los que
+# fallan cuando NumPy y scikit-learn no son de versiones compatibles entre sí.
+#   (módulo a importar, paquete del que leer la versión)
+COMPROBAR = [
+    ("streamlit", None), ("plotly", None), ("fastapi", None), ("uvicorn", None),
+    ("mysql.connector", None), ("bcrypt", None), ("jwt", None), ("pandas", None),
+    ("pyarrow", None), ("numpy", None),
+    ("sklearn.ensemble", "sklearn"),        # aquí están los módulos compilados
+    ("pyspark", None), ("xlsxwriter", None), ("dotenv", None),
+]
+
+roto = []
+for mod, paquete in COMPROBAR:
     try:
         m = importlib.import_module(mod)
-        print(f"  ✔ {mod} {getattr(m, '__version__', '')}")
-    except ImportError:
-        print(f"  ✖ {mod} no instalado")
+        version = getattr(importlib.import_module(paquete or mod), "__version__", "")
+        print(f"  ✔ {(paquete or mod)} {version}")
+    except ImportError as e:
+        # Distinguir «no está instalado» de «está instalado pero no carga»
+        if "No module named" in str(e):
+            print(f"  ✖ {(paquete or mod)} no instalado")
+        else:
+            print(f"  ✖ {(paquete or mod)} instalado pero NO carga: {str(e)[:90]}")
+            roto.append(paquete or mod)
+    except Exception as e:                    # noqa: BLE001
+        print(f"  ✖ {(paquete or mod)} falla al importar: {type(e).__name__}: {str(e)[:80]}")
+        roto.append(paquete or mod)
+
+if roto:
+    print("\n  ─────────────────────────────────────────────────────────────")
+    print("  Hay paquetes instalados que no cargan. La causa habitual es que")
+    print("  NumPy se actualizó después de instalarlos: los módulos compilados")
+    print("  quedan enlazados contra la versión anterior. Se corrige con:")
+    print("\n      pip install --force-reinstall --no-cache-dir numpy scipy scikit-learn")
+    print("\n  El --no-cache-dir es necesario: sin él pip reinstala desde la caché")
+    print("  exactamente la misma versión incompatible.")
+    print("  ─────────────────────────────────────────────────────────────\n")
 for opcional in ["easyocr"]:
     try:
         importlib.import_module(opcional)
@@ -22,7 +54,9 @@ for opcional in ["easyocr"]:
 
 java = shutil.which("java")
 if java:
-    salida = subprocess.run([java, "-version"], capture_output=True, text=True).stderr.splitlines()[0]
+    # nosec B603 - orden fija de dos elementos, sin shell; 'java' lo resuelve shutil.which
+    salida = subprocess.run([java, "-version"],  # nosec B603
+                            capture_output=True, text=True).stderr.splitlines()[0]
     print(f"Java: {salida} ✔")
 else:
     print("Java no encontrado: el pipeline usará el motor pandas (instale JDK 17 para Spark)")

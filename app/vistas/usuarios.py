@@ -2,8 +2,18 @@ import streamlit as st
 
 from app.componentes import accion, cabecera
 from src.seguridad.contrasenas import LONGITUD_MINIMA
-from src.seguridad.permisos import ROLES, tiene_permiso
+from src.seguridad.permisos import MODULOS_VISITANTE, ROLES, modulos_de, tiene_permiso
 from src.servicios import usuarios as srv
+
+
+def _selector_modulos(clave: str, por_defecto=None):
+    """Casillas de módulos para una cuenta Visitante. Siempre son de solo lectura."""
+    return st.multiselect(
+        "Módulos que puede abrir (solo para el rol Visitante)", list(MODULOS_VISITANTE),
+        default=list(por_defecto or []), key=clave,
+        format_func=lambda m: f"{MODULOS_VISITANTE[m][0]} — {MODULOS_VISITANTE[m][1]}",
+        help="El visitante solo consulta: nunca registra, edita, da de baja ni gestiona. "
+             "Si elige el tablero, también verá los datos de inventario y alertas que ese tablero muestra.")
 
 
 def mostrar(usuario: dict):
@@ -41,9 +51,11 @@ def mostrar(usuario: dict):
                                format_func=lambda r: ROLES[r][0])
             pw = st.text_input("Contraseña temporal", type="password",
                                help=f"{LONGITUD_MINIMA}+ caracteres con mayúscula, minúscula, número y símbolo")
+            modulos_nuevo = _selector_modulos("modulos_nuevo")
             st.caption("El usuario deberá cambiarla en su primer ingreso.")
             if st.form_submit_button("Crear", type="primary"):
-                accion(srv.crear_usuario, usuario, nombre, correo, pw, rol, exito=f"Usuario {correo} creado.")
+                accion(srv.crear_usuario, usuario, nombre, correo, pw, rol, modulos_nuevo,
+                       exito=f"Usuario {correo} creado.")
                 if "mensaje_exito" in st.session_state:
                     st.rerun()
     with der:
@@ -64,6 +76,12 @@ def mostrar(usuario: dict):
         if c1.button("Cambiar rol"):
             accion(srv.cambiar_rol, usuario, uid, nuevo_rol, exito="Rol actualizado.")
             st.rerun()
+        if fila["rol"] == "VISITANTE":
+            modulos_cuenta = _selector_modulos(f"modulos_edit_{uid}", modulos_de(fila.to_dict()))
+            if st.button("Guardar módulos"):
+                accion(srv.cambiar_modulos, usuario, uid, modulos_cuenta, exito="Módulos actualizados.")
+                if "mensaje_exito" in st.session_state:
+                    st.rerun()
         etiqueta = "Desactivar" if fila["activo"] else "Activar"
         if c2.button(etiqueta):
             accion(srv.cambiar_estado, usuario, uid, not bool(fila["activo"]), exito=f"Cuenta: {etiqueta.lower()}da.")

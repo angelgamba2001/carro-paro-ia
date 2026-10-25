@@ -13,6 +13,7 @@ Condiciones:
   * Un código de respaldo se consume al usarlo, igual que al iniciar sesión.
   * El cambio queda en eventos_seguridad y en el log de auditoría.
 """
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -99,5 +100,8 @@ def restablecer(usuario_id: int, codigo: str, nueva: str, repetir: str) -> Resul
         from src.servicios.avisos import password_cambiada
         password_cambiada(usuario_id, "el restablecimiento con el segundo factor")
     except Exception:                                     # noqa: BLE001
-        pass
+        # Bandit B110: la contrasena ya quedo restablecida; solo fallo el aviso,
+        # pero el fallo del canal de correo debe quedar registrado.
+        logging.getLogger(__name__).warning(
+            "No se pudo avisar del restablecimiento al usuario %s", usuario_id, exc_info=True)
     return Resultado(True, "Contraseña actualizada. Ya puede iniciar sesión.")

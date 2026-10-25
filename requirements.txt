@@ -16,11 +16,18 @@ qrcode[pil]>=7.4      # código QR para activar el segundo factor
 Pillow>=10.0          # imagen del código QR
 
 # --- Datos, Big Data y analítica ---
-pandas>=2.2
-numpy>=1.26
+# NumPy y todo lo que trae módulos compilados van juntos y con techo de versión
+# mayor. Con anclajes abiertos, pip puede dejar un NumPy nuevo junto a un
+# scikit-learn compilado contra el anterior: el paquete se importa pero revienta
+# al entrar en sus submódulos (ImportError en _expected_mutual_info_fast).
+# Si ocurre:  pip install --force-reinstall --no-cache-dir numpy scipy scikit-learn
+pandas>=2.2,<4
+numpy>=1.26,<3
+scipy>=1.11,<2
 pyarrow>=15            # Parquet del data lake
-pyspark==3.5.3         # requiere Java 17 (o 21) y Python 3.10-3.12
-scikit-learn>=1.4
+pyspark==3.5.8         # requiere Java 17 (o 21) y Python 3.10-3.12
+                       # 3.5.8 corrige PYSEC-2026-3966 (detectado con pip-audit)
+scikit-learn>=1.4,<2    # debe reinstalarse junto a numpy si este cambia de versión mayor
 xlsxwriter>=3.1
 
 # --- Pruebas ---

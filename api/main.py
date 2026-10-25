@@ -27,6 +27,7 @@ from src.analitica.prediccion import leer_metricas  # noqa: E402
 from src.bigdata.procesamiento import leer_gold, ultima_ejecucion  # noqa: E402
 from src.database.connection import base_disponible  # noqa: E402
 from src.seguridad.autenticacion import autenticar, completar_login_mfa, revalidar_usuario  # noqa: E402
+from src.database.connection import PoolAgotado  # noqa: E402
 from src.seguridad.permisos import PermisoDenegado, exigir_permiso  # noqa: E402
 from src.seguridad.tokens import decodificar_token, emitir_token  # noqa: E402
 from src.servicios import alertas as srv_alertas  # noqa: E402
@@ -61,6 +62,12 @@ async def cabeceras_seguridad(request: Request, call_next):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"
     resp.headers["Cache-Control"] = "no-store"
+    # Hallazgo DAST-02 (ZAP 90004): aisla el recurso frente a lecturas sin CORS desde
+    # otro origen. La regla de ZAP rechaza "same-site" por considerarlo insuficiente y
+    # solo admite "same-origin" o "cross-origin". CORP solo gobierna peticiones en modo
+    # no-cors: fetch() con cabecera Authorization viaja en modo CORS y se rige por la
+    # politica CORS ya configurada, de modo que la app movil y la web no se ven afectadas.
+    resp.headers["Cross-Origin-Resource-Policy"] = "same-origin"
     if "server" in resp.headers:
         del resp.headers["server"]
     return resp
@@ -69,6 +76,14 @@ async def cabeceras_seguridad(request: Request, call_next):
 @app.exception_handler(PermisoDenegado)
 async def _403(_, exc):
     return JSONResponse(status_code=403, content={"error": "forbidden", "message": str(exc)})
+
+
+@app.exception_handler(PoolAgotado)
+async def _503(_, exc):
+    # Hallazgo DAST-01: antes escapaba como 500 sin control. Un 503 explicito con
+    # Retry-After indica al cliente que reintente y no delata un fallo interno.
+    return JSONResponse(status_code=503, content={"error": "unavailable", "message": str(exc)},
+                        headers={"Retry-After": "2"})
 
 
 @app.exception_handler(ErrorNegocio)
@@ -99,12 +114,19 @@ def usuario_actual(cred: HTTPAuthorizationCredentials = Depends(esquema_bearer))
     u = revalidar_usuario(int(datos["sub"]))       # rol y estado vigentes en la BD
     if not u:
         raise HTTPException(401, "Usuario inactivo")
+    # Los roles con permisos críticos no pueden operar solo con la contraseña: en la web se
+    # les obliga a activar el segundo factor antes de continuar, y la API debe hacer lo mismo.
+    from src.seguridad.mfa import estado_mfa
+    if estado_mfa(u["id"])["pendiente"]:
+        raise HTTPException(403, "Su rol exige verificación en dos pasos: actívela en la "
+                                 "aplicación web antes de usar la API.")
     return u
 
 
 # ------------------------- modelos -------------------------
 class Login(BaseModel):
-    correo: str = Field(max_length=150)
+    # Solo los caracteres de un correo; cualquier otro devuelve 422 sin llegar a la base de datos
+    correo: str = Field(min_length=1, max_length=254, pattern=r"^[A-Za-z0-9._%+\-@]+$")
     password: str = Field(max_length=128)
 
 
@@ -178,7 +200,9 @@ def login(datos: Login):
                 "mensaje": r.mensaje}
     if not r.ok:
         raise HTTPException(401, r.mensaje)
-    return {"access_token": emitir_token(r.usuario), "token_type": "bearer", "mfa_requerido": False,
+    # Falso positivo B105: "bearer" es el nombre del esquema HTTP (RFC 6750),
+    # no una contrasena embebida.
+    return {"access_token": emitir_token(r.usuario), "token_type": "bearer", "mfa_requerido": False,  # nosec B105
             "usuario": {k: r.usuario[k] for k in ("id", "nombre", "rol")},
             "debe_cambiar_password": bool(r.usuario["debe_cambiar_password"])}
 
@@ -192,15 +216,16 @@ def login_mfa(datos: CodigoMFA, cred: HTTPAuthorizationCredentials = Depends(esq
     r = completar_login_mfa(int(token["sub"]), datos.codigo, origen="API")
     if not r.ok:
         raise HTTPException(401, r.mensaje)
-    return {"access_token": emitir_token(r.usuario), "token_type": "bearer",
+    # Falso positivo B105: idem, es el esquema HTTP Bearer.
+    return {"access_token": emitir_token(r.usuario), "token_type": "bearer",  # nosec B105
             "usuario": {k: r.usuario[k] for k in ("id", "nombre", "rol")},
             "debe_cambiar_password": bool(r.usuario["debe_cambiar_password"])}
 
 
 @app.get("/api/auth/yo", tags=["autenticación"])
 def yo(u=Depends(usuario_actual)):
-    from src.seguridad.permisos import permisos_de
-    return {**u, "permisos": sorted(permisos_de(u["rol"]))}
+    from src.seguridad.permisos import permisos_de_usuario
+    return {**u, "permisos": sorted(permisos_de_usuario(u))}
 
 
 @app.get("/api/carros", tags=["inventario"])

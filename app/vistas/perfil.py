@@ -5,7 +5,7 @@ from app.componentes import cabecera
 from src.seguridad import mfa as srv_mfa
 from src.seguridad.autenticacion import cambiar_password
 from src.seguridad.contrasenas import LONGITUD_MINIMA
-from src.seguridad.permisos import PERMISOS, ROLES, permisos_de
+from src.seguridad.permisos import PERMISOS, ROLES, permisos_de_usuario
 from src.servicios.consentimiento import VERSION_POLITICAS, historial
 
 CSS = """
@@ -277,7 +277,7 @@ def _permisos(usuario: dict):
     nombre, descripcion = ROLES[usuario["rol"]]
     st.markdown(f"**{nombre}.** {descripcion}")
     filas = "".join(f'<div class="permiso-fila"><code>{p}</code><span>{PERMISOS[p]}</span></div>'
-                    for p in sorted(permisos_de(usuario["rol"])))
+                    for p in sorted(permisos_de_usuario(usuario)))
     st.markdown(filas, unsafe_allow_html=True)
 
     st.markdown('<div class="bloque-seguridad"><h3>Aceptación de políticas</h3></div>',

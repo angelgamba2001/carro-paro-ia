@@ -18,6 +18,18 @@ from src import config
 # Google aceptan, que es el criterio útil.
 PATRON = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
+# Lo único que puede escribirse en el campo de usuario al iniciar sesión: letras, números
+# y . _ % + - @  (el mismo alfabeto que PATRON). Es más estricto que "tiene arroba" a
+# propósito: comillas, espacios, ; < > \\ o saltos de línea nunca forman un correo válido.
+# No valida el formato completo (una cuenta antigua debe poder entrar), solo el alfabeto.
+PATRON_LOGIN = re.compile(r"[A-Za-z0-9._%+\-@]{1,254}")
+MENSAJE_LOGIN_CARACTERES = "El correo solo puede llevar letras, números y los símbolos . _ % + - @"
+
+
+def login_valido(correo: str) -> bool:
+    return bool(PATRON_LOGIN.fullmatch(correo or ""))
+
+
 # Dominios de correo personal: se permiten o no según la configuración, pero se
 # reconocen aparte para poder advertir al administrador que está creando una
 # cuenta institucional con una dirección personal.

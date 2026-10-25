@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 
 from src.database.auditoria import registrar_evento_seguridad, registrar_log
@@ -37,7 +38,10 @@ def crear_usuario(usuario: dict, nombre: str, correo: str, password: str, rol: s
         from src.servicios.avisos import cuenta_creada
         cuenta_creada(nuevo, usuario.get("nombre", ""))
     except Exception:                                     # noqa: BLE001
-        pass
+        # Bandit B110: el usuario quedo creado; si el correo de bienvenida falla,
+        # el administrador debe poder enterarse por el registro.
+        logging.getLogger(__name__).warning(
+            "No se pudo avisar de la creacion de la cuenta %s", nuevo, exc_info=True)
     return nuevo
 
 

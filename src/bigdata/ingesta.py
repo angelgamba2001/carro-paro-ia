@@ -55,7 +55,12 @@ def descargar_cum(sello: str, timeout: int = 20) -> dict:
     filtro = " OR ".join(f"upper(principioactivo) like '%{p.split()[0]}%'" for p in principios)
     url = config.CUM_API_URL + "?" + urllib.parse.urlencode({"$limit": 20000, "$where": filtro})
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
+        # Bandit B310: urlopen admite esquemas como file:// o ftp://, con los que una
+        # CUM_API_URL alterada por configuracion podria leer archivos locales. Se exige
+        # https antes de abrir la conexion; si falla, el except de abajo usa la muestra local.
+        if urllib.parse.urlparse(url).scheme != "https":
+            raise ValueError("CUM_API_URL debe usar el esquema https")
+        with urllib.request.urlopen(url, timeout=timeout) as r:  # nosec B310 - esquema validado
             datos = json.loads(r.read().decode("utf-8"))
         if not isinstance(datos, list) or not datos:
             raise ValueError("Respuesta vacía o con formato inesperado")

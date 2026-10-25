@@ -1,9 +1,13 @@
+import logging
+
 import streamlit as st
 
 from app.componentes import accion, cabecera
 from src.agente.agente import AgenteCarroParo
 from src.agente.herramientas import herramientas_permitidas
 from src.seguridad.permisos import tiene_permiso
+
+log = logging.getLogger(__name__)
 
 SUGERENCIAS = {
     "Resumen general": "Dame un resumen del estado de los carros",
@@ -102,7 +106,10 @@ def _entrada_voz() -> str | None:
     if not audio:
         return None
     import hashlib
-    huella = hashlib.md5(audio.getvalue()).hexdigest()
+    # Bandit B324 / Semgrep hash-debil: md5 esta roto criptograficamente. La huella
+    # solo evita reprocesar la misma grabacion al recargar, pero no hay ninguna razon
+    # para conservar md5 cuando sha256 cuesta lo mismo aqui.
+    huella = hashlib.sha256(audio.getvalue()).hexdigest()
     if st.session_state.get("ultimo_audio") == huella:   # evita repetir la misma grabación al recargar
         return None
     st.session_state["ultimo_audio"] = huella
@@ -110,8 +117,12 @@ def _entrada_voz() -> str | None:
     with st.spinner("Transcribiendo audio..."):
         try:
             texto = transcribir(audio.getvalue())
-        except Exception:
-            st.error("No se pudo transcribir el audio.")
+        except Exception as e:
+            # Antes se descartaba la excepción y solo quedaba el mensaje en pantalla:
+            # sin rastro en los registros era imposible saber si falló la descarga del
+            # modelo, la decodificación del audio o la memoria del contenedor.
+            log.exception("Falló la transcripción del audio")
+            st.error(f"No se pudo transcribir el audio — {type(e).__name__}: {e}")
             return None
     if not texto:
         st.warning("No se entendió el audio; intente de nuevo.")
@@ -124,5 +135,6 @@ def _leer_en_voz_alta(texto: str):
     from src.agente.voz import sintetizar
     try:
         st.audio(sintetizar(texto), format="audio/mp3", autoplay=True)
-    except Exception:
+    except Exception as e:
+        log.warning("Falló la síntesis de voz: %s: %s", type(e).__name__, e)
         st.caption("No se pudo generar el audio de la respuesta (edge-tts requiere internet).")

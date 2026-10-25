@@ -1,14 +1,16 @@
+import logging
+
 """Piezas visuales y utilidades compartidas por las vistas."""
 import streamlit as st
 
 from src.seguridad.permisos import PermisoDenegado
 from src.servicios.errores import ErrorNegocio
 
-from app.estilos import APP, BASE, COLORES, SERIE  # noqa: F401
+from app.estilos import APP, BASE, COLORES, MOVIL, SERIE  # noqa: F401
 
 
 def estilos():
-    st.markdown(f"<style>{BASE}{APP}</style>", unsafe_allow_html=True)
+    st.markdown(f"<style>{BASE}{APP}{MOVIL}</style>", unsafe_allow_html=True)
 
 
 
@@ -77,5 +79,7 @@ def descargas(df, nombre: str, clave: str):
     try:
         c2.download_button("Descargar Excel", generar_excel(df), f"{nombre}_{sello}.xlsx",
                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"xls_{clave}")
-    except Exception:
-        pass
+    except Exception as e:
+        # Bandit B110: sin registro, el usuario no sabia por que faltaba el boton
+        # de Excel y el equipo no podia reproducirlo. La descarga CSV sigue activa.
+        logging.getLogger(__name__).info("No se ofrece la descarga en Excel: %s", e)

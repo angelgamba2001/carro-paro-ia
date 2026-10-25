@@ -14,7 +14,7 @@ import streamlit as st
 from src import config
 from app import legal, sesion
 from app.estilos import BASE
-from src.seguridad.autenticacion import autenticar, completar_login_mfa
+from src.seguridad.autenticacion import autenticar, canal_mfa, completar_login_mfa
 from src.servicios.consentimiento import TEXTO_ACEPTACION, VERSION_POLITICAS, registrar_aceptacion
 from src.servicios.inventario import recalcular_estados
 
@@ -445,7 +445,8 @@ def _formulario_credenciales():
     _boton_microsoft()
 
     with st.form("acceso", border=False):
-        correo = st.text_input("Correo institucional", placeholder="usuario@hospital.com")
+        correo = st.text_input("Correo institucional", placeholder="usuario@hospital.com", max_chars=254,
+                               help="Solo letras, números y los símbolos . _ % + - @")
         password = st.text_input("Contraseña", type="password")
         acepta = st.checkbox(TEXTO_ACEPTACION)
         entrar = st.form_submit_button("Ingresar", type="primary", width="stretch")
@@ -546,6 +547,15 @@ def _procesar_retorno_microsoft() -> bool:
         return True
 
     st.session_state["acepto_en_login"] = True    # el consentimiento se registra igual que en el acceso normal
+    # Microsoft comprobó quién es, pero el segundo factor de ESTE sistema se exige igual que
+    # en el acceso con contraseña: si no, entrar por SSO sería una forma de saltárselo.
+    canal = canal_mfa(usuario["id"])
+    if canal:
+        st.session_state["mfa_pendiente"] = usuario     # todavía NO es una sesión válida
+        st.session_state["mfa_canal"] = canal
+        st.session_state.pop("mfa_correo_pedido", None)
+        st.session_state["pantalla"] = "acceso"
+        st.rerun()
     _iniciar(usuario)
     return True
 

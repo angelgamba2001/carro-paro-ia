@@ -46,7 +46,7 @@ def _fecha_sucia(ts: datetime, rng: random.Random) -> str:
 
 def eventos_codigo_azul(desde: date, hasta: date, semilla: int = 42, tendencia_anual: float = 0.06):
     """Genera (fecha_hora, carro, servicio, id_evento, [(medicamento, unidades)])."""
-    rng = random.Random(semilla)
+    rng = random.Random(semilla)  # nosec B311 - datos de simulacion, no credenciales
     d = desde
     n = 0
     while d <= hasta:
@@ -77,7 +77,7 @@ def eventos_codigo_azul(desde: date, hasta: date, semilla: int = 42, tendencia_a
 
 def filas_consumo_historico(desde: date, hasta: date, semilla: int = 42):
     """Consumos en formato de exportación del sistema anterior (con ruido)."""
-    rng = random.Random(semilla + 1)
+    rng = random.Random(semilla + 1)  # nosec B311 - datos de simulacion, no credenciales
     for ts, carro, servicio, id_evento, usados in eventos_codigo_azul(desde, hasta, semilla):
         for med, unidades in usados:
             fila = {
@@ -101,7 +101,7 @@ def filas_consumo_historico(desde: date, hasta: date, semilla: int = 42):
 
 def filas_revision_diaria(desde: date, hasta: date, semilla: int = 7):
     """Lista de chequeo diaria (verificación del carro por turno), un registro por medicamento."""
-    rng = random.Random(semilla)
+    rng = random.Random(semilla)  # nosec B311 - datos de simulacion, no credenciales
     responsables = [f"ENF-{i:03d}" for i in range(1, 41)]
     d = desde
     while d <= hasta:
@@ -129,7 +129,7 @@ def filas_revision_diaria(desde: date, hasta: date, semilla: int = 7):
 
 def filas_bajas_historicas(desde: date, hasta: date, semilla: int = 11):
     """Bajas por vencimiento: principalmente en carros de bajo uso y medicamentos de baja rotación."""
-    rng = random.Random(semilla)
+    rng = random.Random(semilla)  # nosec B311 - datos de simulacion, no credenciales
     d = desde
     while d <= hasta:
         if d.day == 1:  # cierre mensual de farmacia

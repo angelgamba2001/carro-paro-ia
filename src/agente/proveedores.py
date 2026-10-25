@@ -12,6 +12,7 @@ Todos implementan la misma interfaz, así que cambiar de proveedor es cambiar
 AGENTE_PROVEEDOR en el .env; el resto del agente (herramientas, permisos,
 auditoría) no se toca.
 """
+import logging
 import json
 import re
 import unicodedata
@@ -186,7 +187,10 @@ def _medicamento_mencionado(texto: str) -> str | None:
             if len(clave) >= 5 and clave in texto:
                 return m["nombre"]
     except Exception:
-        pass
+        # Bandit B110: si el catalogo no responde, el agente sigue sin medicamento
+        # detectado, pero el fallo debe quedar registrado.
+        logging.getLogger(__name__).warning("No se pudo consultar el catalogo para "
+                                            "detectar el medicamento", exc_info=True)
     return None
 
 

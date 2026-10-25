@@ -15,13 +15,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st  # noqa: E402
 
+# initial_sidebar_state="auto": en escritorio la barra lateral nace abierta, y en
+# un celular nace cerrada. Con "expanded" se abría encima del contenido y había
+# que cerrarla a mano en cada recarga del script.
 st.set_page_config(page_title="Carro de Paro | SMARTDATA 360", page_icon="🚑", layout="wide",
-                   initial_sidebar_state="expanded")
+                   initial_sidebar_state="auto")
 
 from app import sesion  # noqa: E402
 from app.componentes import estilos, mensaje_pendiente  # noqa: E402
 from src.seguridad.mfa import estado_mfa  # noqa: E402
-from src.seguridad.permisos import ROLES, tiene_permiso  # noqa: E402
+from src.seguridad.permisos import ROLES, tiene_permiso, vista_permitida  # noqa: E402
 
 estilos()
 
@@ -69,7 +72,9 @@ if st.session_state.get("codigos_respaldo"):
 
 opciones = {}
 for etiqueta, permiso, modulo in MENU:
-    if (permiso is None or tiene_permiso(usuario, permiso)) and etiqueta not in opciones:
+    # vista_permitida solo restringe a los VISITANTE: ven únicamente las vistas de sus módulos
+    if (permiso is None or tiene_permiso(usuario, permiso)) and vista_permitida(usuario, modulo) \
+            and etiqueta not in opciones:
         opciones[etiqueta] = modulo
 
 with st.sidebar:

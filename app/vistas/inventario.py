@@ -105,11 +105,16 @@ def mostrar(usuario: dict):
 
 
 def _form_registro(usuario, carros, meds, prefijo: str = "reg", lote_ini: str = "",
-                   fecha_ini: date | None = None, origen: str = "MANUAL", confianza: float | None = None):
+                   fecha_ini: date | None = None, origen: str = "MANUAL", confianza: float | None = None,
+                   med_ini: int | None = None):
+    """med_ini: id del medicamento a preseleccionar. Lo usa la lectura OCR cuando
+    reconoce en la etiqueta una referencia que ya está en el catálogo."""
+    etiquetas_med = [f"{m['nombre']} ({m['criticidad']})" for m in meds]
+    indice_med = next((i for i, m in enumerate(meds) if m["id"] == med_ini), 0) if med_ini else 0
     with st.form(f"form_{prefijo}"):
         c1, c2 = st.columns(2)
         carro = c1.selectbox("Carro", [f"{c['codigo']} · {c['servicio']}" for c in carros], key=f"{prefijo}_c")
-        med = c2.selectbox("Medicamento", [f"{m['nombre']} ({m['criticidad']})" for m in meds], key=f"{prefijo}_m")
+        med = c2.selectbox("Medicamento", etiquetas_med, index=indice_med, key=f"{prefijo}_m")
         c3, c4, c5 = st.columns(3)
         lote = c3.text_input("Lote", value=lote_ini, max_chars=60, key=f"{prefijo}_l")
         cantidad = c4.number_input("Cantidad", 1, 500, 1, key=f"{prefijo}_q")
@@ -117,7 +122,7 @@ def _form_registro(usuario, carros, meds, prefijo: str = "reg", lote_ini: str = 
                              min_value=date.today() + timedelta(days=1), key=f"{prefijo}_v")
         if st.form_submit_button("Guardar en inventario", type="primary"):
             carro_id = carros[[f"{c['codigo']} · {c['servicio']}" for c in carros].index(carro)]["id"]
-            med_id = meds[[f"{m['nombre']} ({m['criticidad']})" for m in meds].index(med)]["id"]
+            med_id = meds[etiquetas_med.index(med)]["id"]
             r = accion(srv_inv.registrar_lote, usuario, carro_id, med_id, lote, int(cantidad), venc,
                        origen=origen, confianza_ocr=confianza, exito=f"Lote {lote.upper()} registrado.")
             if r:

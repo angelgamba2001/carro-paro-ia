@@ -22,8 +22,9 @@ EMISOR = "SMARTDATA 360 Carro de Paro"
 VENTANA = 1          # tolera ±30 s de desfase de reloj
 TOTAL_RESPALDO = 8
 
-# Roles que pueden modificar catálogo, dar de baja lotes o gestionar cuentas
-ROLES_MFA_OBLIGATORIO = {"ADMIN", "REGENTE_FARMACIA", "TI", "OFICIAL_SEGURIDAD"}
+# Roles que pueden modificar catálogo, dar de baja lotes, gestionar cuentas o hacer que el
+# agente actúe (DIRECCION_MEDICA puede registrar recomendaciones: agente.acciones)
+ROLES_MFA_OBLIGATORIO = {"ADMIN", "REGENTE_FARMACIA", "TI", "OFICIAL_SEGURIDAD", "DIRECCION_MEDICA"}
 
 
 def mfa_obligatorio(rol: str) -> bool:
