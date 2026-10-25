@@ -24,6 +24,29 @@ def seccion(texto: str):
     st.markdown(f'<div class="seccion">{texto}</div>', unsafe_allow_html=True)
 
 
+# (color, nombre, qué significa). Son los mismos colores del semáforo de carros, de las
+# tarjetas, del estado de las unidades y de la severidad de las alertas.
+LEYENDA_COLORES = [
+    ("vencido", "Crítico", "lote vencido o falta un medicamento crítico; en alertas, severidad alta"),
+    ("proximo_a_vencer", "Atención", "vence en los próximos 30 días o falta un medicamento no crítico; "
+                                     "en alertas, severidad media"),
+    ("vigente", "Correcto", "carro completo y lotes vigentes; en alertas, severidad baja"),
+    ("agotado", "Agotado o de baja", "sin unidades disponibles o retirado del carro"),
+]
+
+
+def leyenda_colores():
+    """Línea breve que explica qué significa cada color del tablero."""
+    items = "".join(
+        f'<span style="display:inline-flex;align-items:baseline;gap:.4rem">'
+        f'<i style="width:.65rem;height:.65rem;border-radius:2px;background:{COLORES[clave]};'
+        f'display:inline-block;flex:none"></i><span><b>{nombre}:</b> {texto}</span></span>'
+        for clave, nombre, texto in LEYENDA_COLORES)
+    st.markdown(f'<div style="display:flex;flex-wrap:wrap;gap:.3rem 1.4rem;font-size:.78rem;'
+                f'line-height:1.35;color:var(--tinta-suave);margin:.1rem 0 .8rem">{items}</div>',
+                unsafe_allow_html=True)
+
+
 def kpi(col, titulo: str, valor, detalle: str = "", color: str = COLORES["azul"]):
     col.markdown(f'<div class="kpi" style="--c:{color}"><div class="t">{titulo}</div>'
                  f'<div class="v">{valor}</div><div class="d">{detalle}</div></div>', unsafe_allow_html=True)

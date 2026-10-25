@@ -4,7 +4,9 @@ import plotly.express as px
 import streamlit as st
 
 from app import datos
-from app.componentes import COLORES, SERIE, cabecera, kpi, moneda, numero, seccion
+from app import asistente_tablero
+from app.componentes import (COLORES, SERIE, cabecera, kpi, leyenda_colores, moneda, numero,
+                              seccion)
 from src.seguridad.permisos import tiene_permiso
 
 _LAYOUT = dict(
@@ -30,6 +32,7 @@ def _fig(fig, alto=340):
 
 def mostrar(usuario: dict):
     cabecera("Tablero", "Estado de los carros de paro")
+    leyenda_colores()
     pestañas = ["Operativo"]
     if tiene_permiso(usuario, "dashboard.analitico"):
         pestañas.append("Analítico")
@@ -39,6 +42,7 @@ def mostrar(usuario: dict):
     if len(tabs) > 1:
         with tabs[1]:
             _analitico(usuario)
+    asistente_tablero.mostrar(usuario)
 
 
 # ---------------------------------------------------------------------------

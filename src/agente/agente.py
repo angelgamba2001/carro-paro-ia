@@ -27,7 +27,8 @@ class AgenteCarroParo:
     def __init__(self, proveedor=None):
         self.proveedor = proveedor or obtener_proveedor()
 
-    def responder(self, usuario: dict, pregunta: str, permitir_acciones: bool = False) -> dict:
+    def responder(self, usuario: dict, pregunta: str, permitir_acciones: bool = False,
+                  contexto: str | None = None) -> dict:
         """permitir_acciones=False: el agente solo consulta. Las herramientas que modifican datos
         (crear recomendaciones/alertas) solo se le ofrecen si el usuario lo autoriza explícitamente."""
         exigir_permiso(usuario, "agente.usar", origen="AGENTE")
@@ -39,6 +40,7 @@ class AgenteCarroParo:
 
         herramientas = [h for h in herramientas_permitidas(usuario) if permitir_acciones or not h.es_accion]
         proveedor = self.proveedor
+        proveedor.contexto = contexto      # cifras que la persona ve en pantalla (solo las usa un LLM)
         resultados: list[dict] = []
         respuesta = None
         for _ in range(MAX_PASOS):
