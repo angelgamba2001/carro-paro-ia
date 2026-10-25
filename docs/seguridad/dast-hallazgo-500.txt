@@ -1,0 +1,180 @@
+EVIDENCIA DAST - OWASP ZAP - escaneo activo autenticado
+SMARTDATA 360 / Modulo Carro de Paro
+Reporte fuente : zap-api-con-token-v2.html
+Extraido el    : 2026-10-03
+Objetivo       : http://api:8000/openapi.json (26 URL importadas, 79 recorridas)
+Autenticacion  : JWT HS256, rol ENFERMERO (via ZAP_AUTH_HEADER_VALUE)
+
+RESUMEN ZAP: FAIL-NEW 0 | FAIL-INPROG 0 | WARN-NEW 2 | INFO 0 | PASS 117
+
+========================================================================
+HALLAZGO 1 - Error 500 del servidor  [ZAP 100000, riesgo Low]
+========================================================================
+Peticion exacta registrada por ZAP (ambas instancias):
+
+   URL        http://api:8000/api/carros
+   Method     GET
+   Parameter  (vacio)
+   Attack     (vacio)
+   Evidence   500
+
+   URL        http://api:8000/api/carros/
+   Method     GET
+   Parameter  (vacio)
+   Attack     (vacio)
+   Evidence   500
+
+LECTURA: Parameter y Attack estan vacios. No hubo carga maliciosa: fue una
+peticion GET normal. El fallo NO depende de la entrada sino de la concurrencia.
+Queda descartada la hipotesis de inyeccion SQL.
+
+CAUSA RAIZ (traceback del contenedor api):
+   mysql/connector/pooling.py:654  get_connection
+     cnx = self._cnx_queue.get(block=False)
+   queue.py:168  get -> raise Empty
+   _queue.Empty
+   => agotamiento del pool de conexiones a MySQL
+
+CLASIFICACION: denegacion de servicio por agotamiento de recursos.
+   CWE-400 (consumo descontrolado de recursos)
+   CWE-772 (recurso no liberado) si se confirma fuga de conexiones
+   ZAP lo califica Low. Severidad Media propuesta por criticidad del contexto:
+   la indisponibilidad de la API durante un codigo azul impide consultar el
+   inventario del carro de paro.
+
+SINTOMA RELACIONADO: respuesta 524 (tiempo de espera agotado) en
+GET /api/auth/yo, coherente con la misma falta de conexiones libres.
+
+========================================================================
+HALLAZGO 2 - Cross-Origin-Resource-Policy ausente  [ZAP 90004, Low]
+========================================================================
+Cabecera de endurecimiento ausente. Se corrige en el middleware
+cabeceras_seguridad de api/main.py (linea 59).
+
+========================================================================
+CONTROLES VERIFICADOS - respuestas de la API bajo ataque activo autenticado
+========================================================================
+
+--- HTTP 401  (4 URL distintas) ---
+   POST  http://api:8000/api/auth/login
+   POST  http://api:8000/api/auth/login/
+   POST  http://api:8000/api/auth/mfa
+   POST  http://api:8000/api/auth/mfa/
+
+--- HTTP 403  (5 URL distintas) ---
+   GET   http://api:8000/api/analitica/anomalias
+   GET   http://api:8000/api/analitica/anomalias/
+   GET   http://api:8000/api/analitica/predicciones
+   GET   http://api:8000/api/analitica/predicciones/
+   GET   http://api:8000/api/analitica/predicciones?solo_riesgo=true
+
+--- HTTP 404  (31 URL distintas) ---
+   GET   http://api:8000
+   GET   http://api:8000/
+   GET   http://api:8000/5731071185751808422
+   GET   http://api:8000/api
+   GET   http://api:8000/api/
+   GET   http://api:8000/api/1174479511939998233
+   GET   http://api:8000/api/agente
+   GET   http://api:8000/api/agente/
+   GET   http://api:8000/api/agente/8999421807956824135
+   GET   http://api:8000/api/agente/actuator/health
+   GET   http://api:8000/api/alertas/10
+   GET   http://api:8000/api/alertas/10/
+   GET   http://api:8000/api/alertas/10/8222160365444884564
+   GET   http://api:8000/api/alertas/7780187516101092286
+   GET   http://api:8000/api/analitica
+   GET   http://api:8000/api/analitica/
+   GET   http://api:8000/api/analitica/6732236894505443448
+   GET   http://api:8000/api/auth
+   GET   http://api:8000/api/auth/
+   GET   http://api:8000/api/auth/8057799326393526376
+   GET   http://api:8000/api/inventario/10
+   GET   http://api:8000/api/inventario/10/
+   GET   http://api:8000/api/inventario/10/2429207163270453365
+   GET   http://api:8000/api/inventario/844850816632537496
+   POST  http://api:8000/computeMetadata/v1/
+   POST  http://api:8000/latest/meta-data/
+   POST  http://api:8000/metadata/instance
+   POST  http://api:8000/metadata/v1
+   POST  http://api:8000/opc/v1/instance/
+   POST  http://api:8000/opc/v2/instance/
+   POST  http://api:8000/openstack/latest/meta_data.json
+
+--- HTTP 422  (12 URL distintas) ---
+   GET   http://api:8000/api/alertas?pendientes=http%3A%2F%2Fwww.google.com%2F
+   GET   http://api:8000/api/analitica/predicciones?solo_riesgo=http%3A%2F%2Fwww.google.com%2F
+   GET   http://api:8000/api/inventario?carro_id=&estado=
+   POST  http://api:8000/api/agente/consulta
+   POST  http://api:8000/api/alertas/10/atender
+   POST  http://api:8000/api/alertas/10/atender/
+   POST  http://api:8000/api/auth/login
+   POST  http://api:8000/api/auth/mfa
+   POST  http://api:8000/api/inventario
+   POST  http://api:8000/api/inventario/
+   POST  http://api:8000/api/inventario/10/consumo
+   POST  http://api:8000/api/inventario/10/consumo/
+
+--- HTTP 500  (2 URL distintas) ---
+   GET   http://api:8000/api/carros
+   GET   http://api:8000/api/carros/
+
+--- HTTP 524  (1 URL distintas) ---
+   GET   http://api:8000/api/auth/yo
+
+========================================================================
+INTERPRETACION
+========================================================================
+401 : POST a /api/auth/login y /api/auth/mfa con credenciales invalidas.
+      No se hallo via de elusion de la autenticacion.
+403 : exclusivamente endpoints de /api/analitica/. Coincide con la matriz
+      RBAC: el rol ENFERMERO carece del permiso dashboard.analitico.
+      Confirmacion independiente del control de acceso bajo ataque activo.
+422 : Pydantic rechazo todos los cuerpos deformados enviados a los endpoints
+      de escritura (/api/inventario, /consumo, /atender, /agente/consulta).
+      Validacion de entrada efectiva.
+404 : rutas inexistentes. Incluye sondas de metadatos de nube
+      (/latest/meta-data/, /computeMetadata/v1/, /opc/v1/instance/,
+      /openstack/latest/meta_data.json, /metadata/v1): no hay superficie SSRF.
+500 : ver hallazgo 1.
+524 : tiempo de espera agotado. Ver hallazgo 1.
+
+========================================================================
+ANALISIS DE CAUSA RAIZ EN CODIGO FUENTE
+========================================================================
+src/database/connection.py:21   pool_size = 8
+
+DESCARTADA LA FUGA DE CONEXIONES (CWE-772):
+  - conexion() (lineas 42-53) es un gestor de contexto con conn.close()
+    dentro de un bloque finally: la conexion se devuelve al pool incluso
+    si la consulta lanza excepcion.
+  - consultar(), consultar_df() y ejecutar() usan ese gestor sin excepcion.
+  - obtener_conexion() (linea 33) es la unica funcion que entrega una
+    conexion cruda sin cierre automatico, pero es CODIGO MUERTO: no tiene
+    ninguna llamada en src/, api/, app/ ni scripts/.
+  - Comprobacion empirica: 20 peticiones concurrentes a /api/carros tras
+    el escaneo -> 20 respuestas 200. El pool se habia recuperado.
+
+CONCLUSION: agotamiento TRANSITORIO del pool de 8 conexiones bajo la
+concurrencia del escaner activo. No hay fuga. Clasificacion definitiva:
+CWE-400 unicamente.
+
+DESCARTADA TAMBIEN LA INYECCION SQL EN /api/carros:
+  src/servicios/inventario.py:253 listar_carros() ejecuta una consulta
+  totalmente estatica, sin parametros ni concatenacion:
+     SELECT c.id, c.codigo, s.nombre AS servicio, c.ubicacion
+     FROM carros c JOIN servicios s ON s.id = c.servicio_id
+     WHERE c.activo = 1 ORDER BY c.codigo
+  Ninguna entrada del usuario alcanza la consulta. No existe superficie
+  de inyeccion en ese endpoint.
+
+CORRECCION PROPUESTA (src/database/connection.py):
+  1. Elevar pool_size de 8 a un valor acorde a la concurrencia esperada.
+  2. Capturar mysql.connector.errors.PoolError en el acceso al pool y
+     reintentar con espera breve.
+  3. Si el reintento falla, responder HTTP 503 con cabecera Retry-After
+     en lugar de dejar propagar la excepcion como 500. Un 500 no
+     controlado es peor que un 503 explicito: indica al atacante que la
+     aplicacion no maneja sus propios estados de error.
+  4. Eliminar obtener_conexion() (codigo muerto que entrega conexiones
+     sin cierre garantizado y podria reintroducir el riesgo de fuga).

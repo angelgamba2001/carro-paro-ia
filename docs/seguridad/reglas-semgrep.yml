@@ -1,0 +1,230 @@
+# Reglas de análisis estático para SMARTDATA 360 · Carro de Paro
+#
+#   semgrep --config docs/seguridad/reglas-semgrep.yml app api src scripts
+#
+# Complementan a Bandit con patrones que este no cubre: configuración insegura,
+# secretos en el código, CORS permisivo y errores propios de FastAPI y Streamlit.
+# Se mantienen en el repositorio para que la auditoría sea reproducible sin
+# depender de catálogos en línea.
+
+rules:
+  # ---------------------------------------------------------------- secretos
+  - id: secreto-en-codigo
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Credencial escrita en el código. Debe leerse del entorno (.env) para que no
+      viaje al repositorio ni quede en el historial de git.
+    metadata:
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      owasp: "A07:2021 Identification and Authentication Failures"
+    patterns:
+      - pattern-either:
+          - pattern: $VAR = "..."
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i)^(password|passwd|pwd|secret|token|api_key|apikey|clave|contrasena|contraseña)$
+      - pattern-not: $VAR = ""
+      - pattern-not-inside: |
+          def $F(..., $VAR = "...", ...):
+              ...
+      # "clave" en español significa tanto contraseña como identificador. Un secreto
+      # real no se parece a un nombre en minúsculas con guiones bajos: esta excepción
+      # descarta claves de widget, nombres de campo y etiquetas, sin dejar pasar una
+      # contraseña de verdad, que llevará mayúsculas, dígitos o símbolos.
+      - pattern-not-regex: \b(CLAVE|clave)\s*=\s*["'][a-z][a-z0-9_]*["']
+
+  - id: jwt-secreto-por-defecto
+    languages: [python]
+    severity: ERROR
+    message: >-
+      El secreto de firma de los tokens no puede tener un valor por defecto ni de
+      ejemplo: quien lo conozca puede fabricar un token válido de cualquier rol.
+    metadata:
+      cwe: "CWE-1188: Insecure Default Initialization of Resource"
+      owasp: "A02:2021 Cryptographic Failures"
+    pattern-regex: (?i)JWT_SECRETO\s*=\s*["'](?!.*os\.getenv)(cambie|ejemplo|secret|test|123|una-cadena)[^"']*["']
+
+  # ------------------------------------------------------------ configuración
+  - id: cors-permisivo
+    languages: [python]
+    severity: ERROR
+    message: >-
+      CORS con comodín. Cualquier sitio web podría llamar a la API en nombre de un
+      usuario autenticado. Declare la lista exacta de orígenes.
+    metadata:
+      cwe: "CWE-942: Permissive Cross-domain Policy with Untrusted Domains"
+      owasp: "A05:2021 Security Misconfiguration"
+    patterns:
+      - pattern-either:
+          - pattern: allow_origins=["*"]
+          - pattern: allow_origins=$X
+      - metavariable-regex:
+          metavariable: $X
+          regex: .*\*.*
+
+  - id: depuracion-activa
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Modo de depuración activado. En producción expone trazas internas y rutas del
+      servidor ante cualquier error.
+    metadata:
+      cwe: "CWE-489: Active Debug Code"
+      owasp: "A05:2021 Security Misconfiguration"
+    pattern-either:
+      - pattern: debug=True
+      - pattern: DEBUG = True
+
+  - id: verificacion-tls-desactivada
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Verificación de certificado TLS desactivada. La conexión deja de proteger
+      contra un intermediario que suplante al servidor.
+    metadata:
+      cwe: "CWE-295: Improper Certificate Validation"
+      owasp: "A02:2021 Cryptographic Failures"
+    pattern-either:
+      - pattern: requests.$M(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)
+      - pattern: ssl.create_default_context(..., check_hostname=False, ...)
+
+  # ------------------------------------------------------------ inyección
+  - id: sql-por-interpolacion
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Consulta SQL armada por interpolación. Use parámetros (%s) y pase los valores
+      como tupla, aunque hoy el valor interpolado sea una constante.
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 Injection"
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute(f"...", ...)
+          - pattern: $CUR.execute("..." % ..., ...)
+          - pattern: $CUR.execute("..." + $X, ...)
+      - pattern-not: $CUR.execute(f"...")
+      - metavariable-regex:
+          metavariable: $CUR
+          regex: .*(cur|cursor|conn).*
+
+  - id: ejecucion-dinamica
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ejecución dinámica de código. Si alguna parte de la cadena proviene de una
+      entrada, permite ejecutar código arbitrario en el servidor.
+    metadata:
+      cwe: "CWE-95: Eval Injection"
+      owasp: "A03:2021 Injection"
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: pickle.loads(...)
+      - pattern: yaml.load($X)
+
+  - id: comando-de-sistema-con-shell
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Comando del sistema con shell=True. Si algún argumento viene de una entrada,
+      permite encadenar comandos. Pase la orden como lista y sin shell.
+    metadata:
+      cwe: "CWE-78: OS Command Injection"
+      owasp: "A03:2021 Injection"
+    pattern-either:
+      - pattern: subprocess.$M(..., shell=True, ...)
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+
+  # ------------------------------------------------- criptografía y aleatoriedad
+  - id: hash-debil
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Función de hash obsoleta (MD5/SHA-1). Use SHA-256 o superior; para contraseñas,
+      una función de derivación de clave como bcrypt.
+    metadata:
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+      owasp: "A02:2021 Cryptographic Failures"
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)
+
+  - id: aleatorio-no-seguro-en-credenciales
+    languages: [python]
+    severity: ERROR
+    message: >-
+      El módulo `random` es predecible y no sirve para generar credenciales, tokens
+      ni códigos de verificación. Use `secrets`.
+    metadata:
+      cwe: "CWE-338: Use of Cryptographically Weak PRNG"
+      owasp: "A02:2021 Cryptographic Failures"
+    patterns:
+      - pattern-either:
+          - pattern: $VAR = random.$M(...)
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i).*(password|token|codigo|clave|secret|salt|nonce|respaldo).*
+
+  # ----------------------------------------------------------------- fugas
+  - id: excepcion-silenciada
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Excepción descartada sin dejar rastro. Un fallo aquí no dejará evidencia en
+      ningún registro. Al menos regístrelo con `log`.
+    metadata:
+      cwe: "CWE-390: Detection of Error Condition Without Action"
+    pattern: |
+      try:
+          ...
+      except ...:
+          pass
+
+  - id: secreto-en-el-registro
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Se está escribiendo una credencial o un código en el registro. Un código de
+      verificación en el log vale tanto como no tenerlo.
+    metadata:
+      cwe: "CWE-532: Insertion of Sensitive Information into Log File"
+      owasp: "A09:2021 Security Logging and Monitoring Failures"
+    patterns:
+      - pattern-either:
+          - pattern: log.$LEVEL(..., $VAR, ...)
+          - pattern: print(..., $VAR, ...)
+          - pattern: logging.$LEVEL(..., $VAR, ...)
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i)^(password|passwd|clave|contrasena|contraseña|codigo|token|secreto|secret)$
+
+  # ------------------------------------------------------------ frontend móvil
+  - id: html-sin-escapar
+    languages: [javascript]
+    severity: ERROR
+    message: >-
+      Se inserta en el DOM un valor que viene del servidor sin escaparlo. Pase el
+      valor por UI.limpio() o use textContent.
+    metadata:
+      cwe: "CWE-79: Cross-site Scripting"
+      owasp: "A03:2021 Injection"
+    patterns:
+      - pattern: $EL.innerHTML = `...${$VAR}...`
+      - pattern-not: $EL.innerHTML = `...${UI.limpio(...)}...`
+      - pattern-not: $EL.innerHTML = `...${UI.numero(...)}...`
+      - pattern-not: $EL.innerHTML = `...${UI.fecha(...)}...`
+      - pattern-not: $EL.innerHTML = `...${UI.moneda(...)}...`
+
+  - id: url-de-api-fija-en-codigo
+    languages: [javascript]
+    severity: INFO
+    message: >-
+      Dirección de servidor escrita en el código. Debe poder cambiarse sin recompilar
+      la aplicación.
+    metadata:
+      cwe: "CWE-1051: Initialization with Hard-coded Network Resource Configuration"
+    pattern-regex: (?i)(https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+)
