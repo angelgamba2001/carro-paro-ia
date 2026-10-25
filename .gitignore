@@ -27,3 +27,7 @@ Thumbs.db
 
 # Herramienta de autoría de interfaz: se versiona el skill, no su binario descargado
 .claude/skills/impeccable/scripts/data/
+
+docs/seguridad/*.sql
+docs/seguridad/*.zip
+docs/seguridad/zap-*.html
