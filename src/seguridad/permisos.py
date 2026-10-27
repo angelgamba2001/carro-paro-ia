@@ -9,8 +9,10 @@ La interfaz web, la API y el agente IA validan con la MISMA función
 (`exigir_permiso`), así ninguno de los tres caminos puede saltarse una regla.
 """
 import logging
+import time
+from collections.abc import Mapping
 
-ROLES = {
+ROLES_BASE = {
     "ADMIN": ("Administrador", "Gestión total: usuarios, roles, catálogo y configuración"),
     "MEDICO": ("Médico", "Consulta el carro y registra el uso de medicamentos en código azul"),
     "ENFERMERO": ("Enfermero(a)", "Revisión diaria, registro, reposición y OCR del carro"),
@@ -22,6 +24,8 @@ ROLES = {
     "TI": ("Soporte TI", "Soporte técnico, desbloqueo de cuentas y ejecución de procesos"),
     "VISITANTE": ("Visitante", "Solo consulta, y únicamente los módulos que le asigne un administrador"),
 }
+
+PREFIJO_ROL = "R_"      # los roles creados desde la interfaz llevan este prefijo en su código
 
 PERMISOS = {
     "inventario.ver": "Consultar inventario de los carros",
@@ -84,12 +88,80 @@ MODULOS_VISITANTE = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Roles creados desde la interfaz (tablas roles / rol_permiso) y roles adicionales
+# ---------------------------------------------------------------------------
+_TTL = 10                       # segundos que se recuerdan los roles leídos de la BD
+_cache = {"t": 0.0, "roles": {}, "permisos": {}}
+
+
+def invalidar_cache():
+    """Se llama tras crear, editar o borrar un rol, para que el cambio se vea de inmediato."""
+    _cache["t"] = 0.0
+
+
+def _roles_bd() -> tuple[dict, dict]:
+    """(roles, permisos) de los roles personalizados. Si la BD no responde, solo existen los base."""
+    if time.monotonic() - _cache["t"] < _TTL:
+        return _cache["roles"], _cache["permisos"]
+    roles, permisos = {}, {}
+    try:
+        from src.database.connection import consultar
+        for r in consultar("SELECT codigo, nombre, descripcion FROM roles WHERE codigo LIKE %s",
+                           (PREFIJO_ROL + "%",)) or []:
+            roles[r["codigo"]] = (r["nombre"], r["descripcion"] or "Rol personalizado")
+        for f in consultar("SELECT rol, permiso FROM rol_permiso WHERE rol LIKE %s",
+                           (PREFIJO_ROL + "%",)) or []:
+            if f["rol"] in roles and f["permiso"] in PERMISOS:       # un permiso inventado no concede nada
+                permisos.setdefault(f["rol"], set()).add(f["permiso"])
+    except Exception:                                                 # noqa: BLE001
+        logging.getLogger(__name__).debug("Roles personalizados no disponibles", exc_info=True)
+    _cache.update(t=time.monotonic(), roles=roles, permisos=permisos)
+    return roles, permisos
+
+
+class _Roles(Mapping):
+    """ROLES: los roles base más los creados desde la interfaz, con la misma forma de siempre
+    (código -> (nombre, descripción)), así el resto del código no cambia."""
+
+    def _todos(self) -> dict:
+        return {**ROLES_BASE, **_roles_bd()[0]}
+
+    def __getitem__(self, clave):
+        return self._todos()[clave]
+
+    def __iter__(self):
+        return iter(self._todos())
+
+    def __len__(self):
+        return len(self._todos())
+
+
+ROLES = _Roles()
+
+
+def es_rol_personalizado(rol: str) -> bool:
+    return rol not in ROLES_BASE and rol in _roles_bd()[0]
+
+
+def roles_adicionales(usuario_id: int) -> list[str]:
+    """Roles extra de una persona (tabla usuario_rol). Sin la tabla, ninguno."""
+    try:
+        from src.database.connection import consultar
+        filas = consultar("SELECT rol FROM usuario_rol WHERE usuario_id = %s ORDER BY rol", (usuario_id,)) or []
+        return [f["rol"] for f in filas]
+    except Exception:                                                 # noqa: BLE001
+        return []
+
+
 class PermisoDenegado(Exception):
     """El rol del usuario no tiene el permiso requerido (equivale a HTTP 403)."""
 
 
 def permisos_de(rol: str) -> set:
-    return MATRIZ.get(rol, set())
+    if rol in MATRIZ:
+        return MATRIZ[rol]
+    return set(_roles_bd()[1].get(rol, set()))
 
 
 def modulos_de(usuario: dict | None) -> set:
@@ -111,7 +183,14 @@ def permisos_de_usuario(usuario: dict | None) -> set:
         for m in modulos_de(usuario):
             permisos |= MODULOS_VISITANTE[m][2]
         return permisos
-    return permisos_de(rol)
+    permisos = set(permisos_de(rol))
+    # Roles adicionales: los permisos son la unión de todos. VISITANTE nunca es adicional.
+    extras = usuario.get("roles_extra") or []
+    if isinstance(extras, (list, tuple, set)):
+        for extra in extras:
+            if extra != "VISITANTE":
+                permisos |= permisos_de(extra)
+    return permisos
 
 
 def vista_permitida(usuario: dict | None, vista: str) -> bool:

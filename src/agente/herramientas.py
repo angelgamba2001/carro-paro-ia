@@ -216,7 +216,7 @@ def detalle_carro(usuario, carro: str):
 
 
 @herramienta("comparar_servicios", "Compara los servicios entre sí: faltantes, unidades vencidas, "
-             "consumo y combinaciones en riesgo. Útil para decidir por dónde empezar.", "inventario.ver")
+             "consumo y combinaciones en riesgo, con el porcentaje vencido (pct_vencido) de cada servicio o área. Úsala para cualquier pregunta por servicio o área (cirugía, UCI, urgencias...).", "inventario.ver")
 def comparar_servicios(usuario):
     stock = srv_inv.stock_por_carro(usuario)
     inv = srv_inv.listar_inventario(usuario)
@@ -234,11 +234,14 @@ def comparar_servicios(usuario):
             "carros": int(g["carro"].nunique()),
             "faltantes": len(faltan),
             "faltantes_criticos": int((faltan["criticidad"] == "ALTA").sum()),
+            "unidades_total": int(inv_s["cantidad"].sum()) if not inv_s.empty else 0,
             "unidades_vencidas": int(inv_s[inv_s["estado"] == "vencido"]["cantidad"].sum()) if not inv_s.empty else 0,
             "unidades_por_vencer": int(inv_s[inv_s["estado"] == "proximo_a_vencer"]["cantidad"].sum()) if not inv_s.empty else 0,
             "combinaciones_en_riesgo": en_riesgo,
         })
     tabla = pd.DataFrame(filas).sort_values(["faltantes_criticos", "unidades_vencidas"], ascending=False)
+    tabla["pct_vencido"] = [round(100 * v / t, 1) if t else 0.0
+                            for v, t in zip(tabla["unidades_vencidas"], tabla["unidades_total"])]
     peor = tabla.iloc[0]["servicio"] if not tabla.empty else None
     return {"comparacion": tabla, "servicio_con_mas_problemas": peor}
 

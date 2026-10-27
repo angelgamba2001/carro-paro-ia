@@ -79,9 +79,12 @@ def mostrar(usuario: dict, obligatorio: bool = False, exigir_mfa: bool = False,
         return
 
     cabecera("Mi cuenta", usuario["correo"])
-    contrasena, dos_pasos, permisos = st.tabs(["Contraseña", "Verificación en dos pasos", "Mis permisos"])
+    contrasena, correo, dos_pasos, permisos = st.tabs(
+        ["Contraseña", "Correo", "Verificación en dos pasos", "Mis permisos"])
     with contrasena:
         _formulario_password(usuario)
+    with correo:
+        _formulario_correo(usuario)
     with dos_pasos:
         _seccion_mfa(usuario)
     with permisos:
@@ -107,7 +110,7 @@ def _formulario_password(usuario: dict):
         if nueva != repetir:
             st.error("Las contraseñas no coinciden.")
             return
-        errores = cambiar_password(usuario["id"], actual, nueva)
+        errores = cambiar_password(usuario["id"], actual, nueva, st.session_state.get("token_sesion", ""))
         if errores:
             for e in errores:
                 st.error(e)
@@ -115,6 +118,47 @@ def _formulario_password(usuario: dict):
             st.session_state["usuario"]["debe_cambiar_password"] = 0
             st.session_state["mensaje_exito"] = "Contraseña actualizada."
             st.rerun()
+
+
+# ---------------------------------------------------------------------------
+def _formulario_correo(usuario: dict):
+    """Cambio de correo en dos pasos: contraseña actual y código enviado al correo nuevo."""
+    from src.servicios import cuenta
+    from src.servicios.errores import ErrorNegocio
+    st.caption(f"Correo actual: **{usuario['correo']}**. El correo es su usuario para entrar; "
+               "para cambiarlo confirmamos que usted controla el buzón nuevo.")
+    pendiente = st.session_state.get("cambio_correo_nuevo")
+    if not pendiente:
+        with st.form("cambio_correo"):
+            nuevo = st.text_input("Correo nuevo", max_chars=150)
+            password = st.text_input("Contraseña actual", type="password")
+            if st.form_submit_button("Enviar código al correo nuevo", type="primary"):
+                try:
+                    aviso = cuenta.solicitar_cambio_correo(usuario["id"], password, nuevo)
+                    st.session_state["cambio_correo_nuevo"] = nuevo.strip().lower()
+                    st.session_state["cambio_correo_aviso"] = aviso
+                    st.rerun()
+                except ErrorNegocio as e:
+                    st.error(str(e))
+        return
+    st.info(st.session_state.get("cambio_correo_aviso", f"Enviamos un código a {pendiente}."))
+    with st.form("confirmar_correo"):
+        codigo = st.text_input("Código de 6 dígitos", max_chars=6)
+        confirmar = st.form_submit_button("Confirmar cambio", type="primary")
+    if confirmar:
+        try:
+            nuevo = cuenta.confirmar_cambio_correo(usuario["id"], codigo)
+            st.session_state["usuario"]["correo"] = nuevo
+            for k in ("cambio_correo_nuevo", "cambio_correo_aviso"):
+                st.session_state.pop(k, None)
+            st.session_state["mensaje_exito"] = f"Correo actualizado a {nuevo}. Úselo desde ahora para entrar."
+            st.rerun()
+        except ErrorNegocio as e:
+            st.error(str(e))
+    if st.button("Cancelar el cambio"):
+        for k in ("cambio_correo_nuevo", "cambio_correo_aviso"):
+            st.session_state.pop(k, None)
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +318,11 @@ def _mostrar_codigos_respaldo():
 
 # ---------------------------------------------------------------------------
 def _permisos(usuario: dict):
-    nombre, descripcion = ROLES[usuario["rol"]]
+    nombre, descripcion = ROLES.get(usuario["rol"], (usuario["rol"], ""))
     st.markdown(f"**{nombre}.** {descripcion}")
+    extras = [ROLES[r][0] for r in usuario.get("roles_extra") or [] if r in ROLES]
+    if extras:
+        st.caption("Roles adicionales: " + ", ".join(extras))
     filas = "".join(f'<div class="permiso-fila"><code>{p}</code><span>{PERMISOS[p]}</span></div>'
                     for p in sorted(permisos_de_usuario(usuario)))
     st.markdown(filas, unsafe_allow_html=True)

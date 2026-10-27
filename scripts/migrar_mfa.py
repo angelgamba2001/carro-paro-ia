@@ -14,7 +14,7 @@ from src.database.connection import conexion, consultar  # noqa: E402
 
 COLUMNAS = {
     # Falso positivo B105: es la definicion de una columna SQL, no una contrasena.
-    "totp_secret": "VARCHAR(64) NULL",  # nosec B105
+    "totp_secret": "VARCHAR(255) NULL",  # nosec B105
     "mfa_activo": "TINYINT NOT NULL DEFAULT 0",
     "mfa_confirmado": "TINYINT NOT NULL DEFAULT 0",
     "totp_ultimo_intervalo": "BIGINT NULL",

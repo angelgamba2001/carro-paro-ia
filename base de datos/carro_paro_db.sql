@@ -59,7 +59,7 @@ CREATE TABLE usuarios (
     ultimo_acceso          DATETIME     NULL,
     fecha_creacion         DATETIME     DEFAULT CURRENT_TIMESTAMP,
     -- Segundo factor (TOTP)
-    totp_secret            VARCHAR(64)  NULL,
+    totp_secret            VARCHAR(255) NULL,
     mfa_activo             TINYINT      NOT NULL DEFAULT 0,
     mfa_confirmado         TINYINT      NOT NULL DEFAULT 0,
     totp_ultimo_intervalo  BIGINT       NULL,

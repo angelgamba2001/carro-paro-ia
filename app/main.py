@@ -15,6 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st  # noqa: E402
 
+from src import registro_errores  # noqa: E402
+
+registro_errores.configurar()    # errores a data/logs/errores.log y a la tabla errores_sistema
+
 # initial_sidebar_state="auto": en escritorio la barra lateral nace abierta, y en
 # un celular nace cerrada. Con "expanded" se abría encima del contenido y había
 # que cerrarla a mano en cada recarga del script.
@@ -107,7 +111,15 @@ if st.session_state.get("legal_interno"):
     st.markdown(f'<div class="documento">{legal.CUERPOS[st.session_state["legal_interno"]]}</div>',
                 unsafe_allow_html=True)
 else:
-    vista(opciones[eleccion]).mostrar(usuario)
+    try:
+        vista(opciones[eleccion]).mostrar(usuario)
+    except Exception:                                   # noqa: BLE001
+        # Los controles de flujo de Streamlit (st.stop, st.rerun) no son Exception, así que pasan.
+        # Cualquier otro fallo se registra con su traza y la persona ve un mensaje sin detalles técnicos.
+        import logging
+        logging.getLogger("app").exception("Error en la vista %s", opciones[eleccion])
+        st.error("Ocurrió un error inesperado en esta pantalla. Quedó registrado para el equipo de soporte; "
+                 "intente de nuevo o avise a sistemas si se repite.")
 
 # El asistente queda a mano en todas las pantallas, salvo en la suya propia
 if eleccion != "Agente IA" and not st.session_state.get("legal_interno"):

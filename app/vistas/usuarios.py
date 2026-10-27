@@ -2,8 +2,49 @@ import streamlit as st
 
 from app.componentes import accion, cabecera
 from src.seguridad.contrasenas import LONGITUD_MINIMA
-from src.seguridad.permisos import MODULOS_VISITANTE, ROLES, modulos_de, tiene_permiso
+from src.seguridad.permisos import MODULOS_VISITANTE, PERMISOS, ROLES, modulos_de, tiene_permiso
+from src.servicios import roles as srv_roles
 from src.servicios import usuarios as srv
+
+
+def _roles_personalizados(usuario: dict):
+    """Crear roles con los permisos que se elijan, cambiarlos o eliminarlos."""
+    try:
+        roles = srv_roles.listar_roles_personalizados(usuario)
+    except Exception:                                  # noqa: BLE001  (falta aplicar la migración)
+        st.warning("Falta aplicar la migración de seguridad: python scripts/migrar_seguridad.py")
+        return
+    with st.expander(f"Roles personalizados ({len(roles)})"):
+        if roles:
+            st.dataframe([{"rol": r["nombre"], "permisos": ", ".join(r["permisos"]),
+                           "personas": r["usuarios"]} for r in roles], hide_index=True, width="stretch")
+        else:
+            st.caption("Aún no hay roles personalizados. Los roles base (Administrador, Enfermero…) no se modifican.")
+        with st.form("nuevo_rol", clear_on_submit=True):
+            st.markdown("**Crear un rol**")
+            nombre = st.text_input("Nombre del rol", max_chars=60)
+            descripcion = st.text_input("Descripción", max_chars=200)
+            permisos = st.multiselect("Permisos", list(PERMISOS), format_func=lambda p: f"{p} — {PERMISOS[p]}")
+            if st.form_submit_button("Crear rol", type="primary"):
+                accion(srv_roles.crear_rol, usuario, nombre, descripcion, permisos, exito="Rol creado.")
+                if "mensaje_exito" in st.session_state:
+                    st.rerun()
+        if roles:
+            st.markdown("**Modificar o eliminar un rol**")
+            codigo = st.selectbox("Rol", [r["codigo"] for r in roles],
+                                  format_func=lambda c: next(r["nombre"] for r in roles if r["codigo"] == c))
+            actual = next(r for r in roles if r["codigo"] == codigo)
+            nuevos = st.multiselect("Permisos del rol", list(PERMISOS), default=actual["permisos"],
+                                    format_func=lambda p: f"{p} — {PERMISOS[p]}", key=f"permisos_{codigo}")
+            b1, b2 = st.columns(2)
+            if b1.button("Guardar permisos", key=f"guardar_{codigo}"):
+                accion(srv_roles.cambiar_permisos_rol, usuario, codigo, nuevos, exito="Permisos del rol actualizados.")
+                if "mensaje_exito" in st.session_state:
+                    st.rerun()
+            if b2.button("Eliminar rol", key=f"borrar_{codigo}"):
+                accion(srv_roles.eliminar_rol, usuario, codigo, exito="Rol eliminado.")
+                if "mensaje_exito" in st.session_state:
+                    st.rerun()
 
 
 def _selector_modulos(clave: str, por_defecto=None):
@@ -40,6 +81,7 @@ def mostrar(usuario: dict):
 
     if not tiene_permiso(usuario, "usuarios.gestionar"):
         return
+    _roles_personalizados(usuario)
     izq, der = st.columns(2)
     with izq:
         st.markdown("#### Crear usuario")
@@ -80,6 +122,17 @@ def mostrar(usuario: dict):
             modulos_cuenta = _selector_modulos(f"modulos_edit_{uid}", modulos_de(fila.to_dict()))
             if st.button("Guardar módulos"):
                 accion(srv.cambiar_modulos, usuario, uid, modulos_cuenta, exito="Módulos actualizados.")
+                if "mensaje_exito" in st.session_state:
+                    st.rerun()
+        if fila["rol"] != "VISITANTE":
+            crudo = fila.get("roles_adicionales")
+            actuales = [r for r in (crudo.split(",") if isinstance(crudo, str) else []) if r in ROLES]
+            elegibles = [r for r in ROLES if r not in ("VISITANTE", fila["rol"])]
+            extras = st.multiselect("Roles adicionales (suman permisos al rol principal)", elegibles,
+                                    default=[r for r in actuales if r in elegibles], key=f"extras_{uid}",
+                                    format_func=lambda r: ROLES[r][0])
+            if st.button("Guardar roles adicionales"):
+                accion(srv_roles.cambiar_roles_adicionales, usuario, uid, extras, exito="Roles adicionales actualizados.")
                 if "mensaje_exito" in st.session_state:
                     st.rerun()
         etiqueta = "Desactivar" if fila["activo"] else "Activar"

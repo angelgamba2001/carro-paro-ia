@@ -14,6 +14,7 @@ def mostrar(usuario: dict):
         pestañas.append("Log de auditoría")
     if tiene_permiso(usuario, "seguridad.ver"):
         pestañas.append("Eventos de seguridad")
+        pestañas.append("Errores del sistema")
     for nombre, tab in zip(pestañas, st.tabs(pestañas)):
         with tab:
             if nombre == "Log de auditoría":
@@ -30,6 +31,15 @@ def mostrar(usuario: dict):
                     df = df[df["origen"].isin(origenes)]
                 st.dataframe(df, hide_index=True, width="stretch")
                 descargas(df, "auditoria", "aud")
+            elif nombre == "Errores del sistema":
+                df = srv.errores_sistema(usuario, dias)
+                if df.empty:
+                    st.info("Sin errores registrados en el periodo.")
+                    continue
+                st.caption("Errores de la aplicación y de la API. También quedan en el archivo "
+                           "data/logs/errores.log, que sigue funcionando aunque la base de datos esté caída.")
+                st.dataframe(df.drop(columns=["traza"]), hide_index=True, width="stretch")
+                descargas(df, "errores_sistema", "err")
             else:
                 df = srv.eventos_seguridad(usuario, dias)
                 if df.empty:

@@ -1,0 +1,39 @@
+# Contexto de construcción de la imagen (Dockerfile: COPY . .)
+# Todo lo que no se excluya aquí acaba dentro de la imagen.
+
+# Entorno virtual de Windows: en Linux no sirve de nada y pesa varios GB
+venv/
+.venv/
+
+# Control de versiones y cachés
+.git/
+.gitattributes
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.claude/
+
+# Credenciales: entran en tiempo de ejecución por env_file, nunca horneadas en la imagen
+.env
+.streamlit/secrets.toml
+
+# Data lake: lo regenera el inicializador dentro del volumen.
+# data/referencia/ se conserva: la ingesta del CUM usa cum_muestra.json.
+data/raw/
+data/bronze/
+data/silver/
+data/gold/
+data/correo_saliente/
+
+# Aplicación móvil Cordova: consume la API por HTTP, no hace falta en la imagen
+movil/
+
+# Material que no se ejecuta
+notebooks/
+*.mwb
+*.mwb.bak
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

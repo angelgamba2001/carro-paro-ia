@@ -19,7 +19,8 @@ def mostrar():
 def _paso_correo():
     st.markdown('<h1>Restablecer contraseña</h1>'
                 '<p class="sub">Necesitará su aplicación de autenticación o uno de sus códigos de '
-                'respaldo.</p><div class="regla-acceso"></div>', unsafe_allow_html=True)
+                'respaldo; si no tiene verificación en dos pasos, le enviaremos un código a su correo.</p>'
+                '<div class="regla-acceso"></div>', unsafe_allow_html=True)
     with st.form("recuperar_correo", border=False):
         correo = st.text_input("Correo institucional", placeholder="usuario@hospital.com")
         seguir = st.form_submit_button("Continuar", type="primary", width="stretch")
@@ -29,13 +30,13 @@ def _paso_correo():
             st.session_state["recuperar_id"] = r.usuario_id
             st.session_state["recuperar_cuenta"] = correo.strip().lower()
             st.session_state["recuperar_canal"] = r.canal
-            if r.canal == "correo":       # sin app de autenticación, el código va al buzón
+            if r.canal in ("correo", "correo_temporal"):    # sin app de autenticación, el código va al buzón
                 from src.seguridad.mfa_correo import enviar_codigo
                 enviar_codigo(r.usuario_id)
             st.rerun()
         else:
             st.info(r.mensaje)
-            st.caption("Si no tiene la verificación en dos pasos activa, solicite el restablecimiento "
+            st.caption("Si no recibe el código o su cuenta está bloqueada, solicite el restablecimiento "
                        "al área de soporte de sistemas.")
     if st.button("Volver al acceso", width="stretch"):
         st.session_state["pantalla"] = "acceso"
@@ -49,8 +50,9 @@ def _paso_codigo():
     canal = st.session_state.get("recuperar_canal", "app")
     ayuda = {"app": "Los seis dígitos de su aplicación, o un código de respaldo.",
              "correo": "El código de seis dígitos que acabamos de enviar a su correo.",
+             "correo_temporal": "El código de seis dígitos que acabamos de enviar a su correo.",
              "ambos": "De su aplicación, un código de respaldo, o el que pida por correo."}
-    if canal == "correo":
+    if canal in ("correo", "correo_temporal"):
         st.info("Le enviamos un código a su correo institucional. Vence en unos minutos.")
     with st.form("recuperar_codigo", border=False):
         codigo = st.text_input("Código de verificación", max_chars=9,
@@ -71,7 +73,7 @@ def _paso_codigo():
         st.error(r.mensaje)
         for e in r.errores or []:
             st.caption(f"· {e}")
-    if canal in ("correo", "ambos"):
+    if canal in ("correo", "ambos", "correo_temporal"):
         if st.button("Enviarme un código al correo", width="stretch"):
             from src.seguridad.mfa_correo import enviar_codigo
             ok, aviso = enviar_codigo(st.session_state["recuperar_id"])

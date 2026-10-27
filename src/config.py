@@ -29,6 +29,14 @@ JWT_SECRETO = os.getenv("JWT_SECRETO", "")
 JWT_MINUTOS_EXPIRACION = _int("JWT_MINUTOS_EXPIRACION", 30)
 ENTORNO = os.getenv("ENTORNO", "desarrollo")  # desarrollo | produccion
 
+# Una sola sesión web activa por persona: al entrar desde otro lugar, la anterior se cierra
+# y queda registrado. Con 0 se permiten sesiones simultáneas (cada una sigue siendo revocable).
+SESION_UNICA = os.getenv("SESION_UNICA", "1").strip().lower() in ("1", "true", "si", "sí", "yes")
+# Clave Fernet (32 bytes en base64 url-safe) con la que se cifra el secreto del segundo factor.
+# Generar:  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Si se omite se deriva de JWT_SECRETO; en producción debe existir alguna de las dos.
+CLAVE_CIFRADO = os.getenv("CLAVE_CIFRADO", "")
+
 
 def _bool(nombre: str, defecto: bool = False) -> bool:
     return os.getenv(nombre, str(defecto)).strip().lower() in ("1", "true", "si", "sí", "yes")
@@ -51,6 +59,11 @@ CORREO_REMITENTE = os.getenv("CORREO_REMITENTE", "")   # si se omite, se usa SMT
 # Segundo factor enviado por correo (alternativa al TOTP)
 MFA_CORREO_MINUTOS = _int("MFA_CORREO_MINUTOS", 10)
 MFA_CORREO_MAX_INTENTOS = _int("MFA_CORREO_MAX_INTENTOS", 5)
+# Segundo factor con la aplicación de autenticación (TOTP)
+#   MFA_VENTANA: códigos vecinos que se aceptan (1 = ±30 s de desfase de reloj; 0 = solo el actual)
+#   MFA_PENDIENTE_MINUTOS: cuánto puede esperar la pantalla del código antes de volver al inicio
+MFA_VENTANA = max(0, min(2, _int("MFA_VENTANA", 1)))
+MFA_PENDIENTE_MINUTOS = max(1, _int("MFA_PENDIENTE_MINUTOS", 5))
 
 # --- Inicio de sesión con Microsoft (Entra ID / Azure AD) ---
 MS_CLIENT_ID = os.getenv("MS_CLIENT_ID", "")

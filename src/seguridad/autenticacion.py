@@ -10,6 +10,7 @@ from src import config
 from src.database.auditoria import registrar_evento_seguridad
 from src.database.connection import consultar, ejecutar
 from src.seguridad import correos
+from src.seguridad.permisos import roles_adicionales
 from src.seguridad.contrasenas import hash_password, validar_politica, verificar_password
 
 MENSAJE_GENERICO = "Correo o contraseña incorrectos."
@@ -43,6 +44,18 @@ def hay_columna_modulos() -> bool:
     return _modulos_listos
 
 
+_tablas_listas: set = set()
+
+
+def hay_tabla(nombre: str) -> bool:
+    """¿Existe la tabla? Solo se recuerda el sí, igual que hay_columna_modulos."""
+    if nombre not in _tablas_listas and consultar(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+            (nombre,), uno=True):
+        _tablas_listas.add(nombre)
+    return nombre in _tablas_listas
+
+
 def _campos() -> str:
     """Columnas que se leen del usuario. `modulos` entra solo cuando la migración ya la
     creó: una base sin migrar sigue dejando entrar en vez de fallar con «Unknown column».
@@ -64,6 +77,7 @@ def _publico(u: dict) -> dict:
     """Datos del usuario que pueden viajar en sesión/token (sin hash)."""
     publico = {k: u[k] for k in ("id", "nombre", "correo", "rol", "activo", "debe_cambiar_password")}
     publico["modulos"] = u.get("modulos")      # solo lo usan las cuentas VISITANTE
+    publico["roles_extra"] = roles_adicionales(u["id"])      # roles adicionales (tabla usuario_rol)
     return publico
 
 
@@ -200,7 +214,7 @@ def revalidar_usuario(usuario_id: int) -> dict | None:
     return _publico(u)
 
 
-def cambiar_password(usuario_id: int, actual: str, nueva: str) -> list[str]:
+def cambiar_password(usuario_id: int, actual: str, nueva: str, sesion_actual: str = "") -> list[str]:
     u = consultar("SELECT correo, password_hash FROM usuarios WHERE id = %s", (usuario_id,), uno=True)
     if not u or not verificar_password(actual, u["password_hash"])[0]:
         return ["La contraseña actual no es correcta."]
@@ -212,6 +226,8 @@ def cambiar_password(usuario_id: int, actual: str, nueva: str) -> list[str]:
     ejecutar("UPDATE usuarios SET password_hash = %s, debe_cambiar_password = 0 WHERE id = %s",
              (hash_password(nueva), usuario_id))
     registrar_evento_seguridad("CAMBIO_PASSWORD", u["correo"], usuario_id)
+    from src.seguridad import sesiones
+    sesiones.cerrar_todas(usuario_id, sesion_actual)       # las demás sesiones abiertas dejan de valer
     try:
         from src.servicios.avisos import password_cambiada
         password_cambiada(usuario_id, "el cambio desde su perfil")

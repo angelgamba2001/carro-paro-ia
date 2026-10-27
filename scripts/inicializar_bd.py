@@ -21,7 +21,7 @@ from src import config  # noqa: E402
 from src.bigdata.simulador import eventos_codigo_azul  # noqa: E402
 from src.datos_referencia import CARROS, MEDICAMENTOS, SERVICIOS, USUARIOS_DEMO  # noqa: E402
 from src.seguridad.contrasenas import hash_password, validar_politica  # noqa: E402
-from src.seguridad.permisos import MATRIZ, PERMISOS, ROLES  # noqa: E402
+from src.seguridad.permisos import MATRIZ, PERMISOS, ROLES_BASE as ROLES  # noqa: E402
 
 DIAS_OPERACION = 60   # movimientos recientes en la base operativa
 
@@ -135,6 +135,7 @@ MIGRACIONES = [
     "migrar_correo.py",
     "migrar_registro.py",
     "migrar_visitante.py",
+    "migrar_seguridad.py",
 ]
 
 
@@ -185,6 +186,9 @@ def main():
     a = ap.parse_args()
     if a.solo_si_vacia and base_poblada():
         print("= La base ya existe y tiene usuarios: no se recrea.")
+        # Las migraciones son idempotentes: así una base existente recibe las columnas y tablas
+        # nuevas (roles, sesiones, errores...) sin perder datos al actualizar la aplicación.
+        aplicar_migraciones()
         print("  Para empezar de cero: docker compose down -v, o ejecute este script sin --solo-si-vacia.")
         return
     errores = validar_politica(a.password)

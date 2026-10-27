@@ -13,6 +13,7 @@ import streamlit as st
 
 from src import config
 from app import legal, sesion
+from app.filtros import solo_caracteres_de_correo
 from app.estilos import BASE
 from src.seguridad.autenticacion import autenticar, canal_mfa, completar_login_mfa
 from src.servicios.consentimiento import TEXTO_ACEPTACION, VERSION_POLITICAS, registrar_aceptacion
@@ -450,6 +451,7 @@ def _formulario_credenciales():
         password = st.text_input("Contraseña", type="password")
         acepta = st.checkbox(TEXTO_ACEPTACION)
         entrar = st.form_submit_button("Ingresar", type="primary", width="stretch")
+    solo_caracteres_de_correo("Correo institucional")      # no deja escribir ni pegar otros caracteres
 
     if entrar:
         if not acepta:
@@ -561,6 +563,15 @@ def _procesar_retorno_microsoft() -> bool:
 
 
 def _formulario_segundo_factor():
+    from datetime import datetime
+
+    from src.seguridad.mfa import pendiente_vencido
+    desde = st.session_state.setdefault("mfa_pendiente_desde", datetime.now())
+    if pendiente_vencido(desde):
+        for clave in ("mfa_pendiente", "mfa_canal", "mfa_correo_pedido", "mfa_pendiente_desde"):
+            st.session_state.pop(clave, None)
+        st.session_state["mensaje_acceso"] = "La verificación expiró por inactividad. Inicie sesión de nuevo."
+        st.rerun()
     pendiente = st.session_state["mfa_pendiente"]
     canal = st.session_state.get("mfa_canal", "app")
     st.markdown(f'<h1>Verificación</h1><p class="sub">Cuenta: {pendiente["correo"]}</p>'
@@ -599,13 +610,13 @@ def _formulario_segundo_factor():
             (st.success if ok else st.warning)(aviso)
 
     if st.button("Volver", width="stretch"):
-        for clave in ("mfa_pendiente", "mfa_canal", "mfa_correo_pedido"):
+        for clave in ("mfa_pendiente", "mfa_canal", "mfa_correo_pedido", "mfa_pendiente_desde"):
             st.session_state.pop(clave, None)
         st.rerun()
 
 
 def _iniciar(usuario: dict):
-    for clave in ("mfa_canal", "mfa_correo_pedido"):
+    for clave in ("mfa_canal", "mfa_correo_pedido", "mfa_pendiente_desde"):
         st.session_state.pop(clave, None)
     if st.session_state.pop("acepto_en_login", False):
         registrar_aceptacion(usuario["id"], origen="WEB")

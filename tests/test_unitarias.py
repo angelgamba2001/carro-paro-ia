@@ -141,3 +141,212 @@ def test_mfa_obligatorio_para_roles_administrativos():
     for rol in ("ADMIN", "TI", "OFICIAL_SEGURIDAD", "DIRECCION_MEDICA", "REGENTE_FARMACIA"):
         assert mfa_obligatorio(rol)
     assert not mfa_obligatorio("VISITANTE")
+
+
+# ---------------- Controles de seguridad ampliados (casos 5, 8, 15-20) ----------------
+def _png_valido() -> bytes:
+    import io
+
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "white").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@pytest.fixture
+def sin_bd(monkeypatch):
+    """Evita escribir eventos en la base de datos y anota los que se habrían escrito."""
+    eventos = []
+    monkeypatch.setattr("src.seguridad.archivos.registrar_evento_seguridad",
+                        lambda tipo, *a, **k: eventos.append((tipo, a, k)))
+    return eventos
+
+
+def test_cifrado_secreto_totp_ida_y_vuelta():
+    from src.seguridad.cifrado import cifrar, descifrar, esta_cifrado
+    secreto = "JBSWY3DPEHPK3PXP"
+    c = cifrar(secreto)
+    assert esta_cifrado(c) and secreto not in c
+    assert descifrar(c) == secreto
+    assert cifrar(c) == c                         # no se cifra dos veces
+    assert descifrar(secreto) == secreto          # un secreto antiguo, en claro, se sigue leyendo
+    assert cifrar(None) is None and descifrar("") == ""
+
+
+def test_cifrado_detecta_clave_distinta(monkeypatch):
+    from src import config
+    from src.seguridad.cifrado import cifrar, descifrar
+    c = cifrar("ABC234")
+    monkeypatch.setattr(config, "CLAVE_CIFRADO", "")
+    monkeypatch.setattr(config, "JWT_SECRETO", "otro-secreto")
+    with pytest.raises(ValueError):
+        descifrar(c)
+
+
+def test_imagen_valida_pasa(sin_bd):
+    from src.seguridad.archivos import validar_imagen
+    assert validar_imagen(_png_valido(), "etiqueta.png") == "png"
+    assert not sin_bd
+
+
+@pytest.mark.parametrize("contenido,nombre", [
+    (b"MZ\x90\x00" + b"\x00" * 200, "virus.png"),                 # .exe renombrado a imagen
+    (b"%PDF-1.7 ...", "documento.png"),                            # PDF con extensión de imagen
+    (b"", "vacio.png"),
+    (b"\x89PNG\r\n\x1a\n" + b"basura", "rota.png"),                # firma de PNG, contenido dañado
+    (b"texto cualquiera", "nota.jpg"),
+])
+def test_archivo_falso_se_rechaza(contenido, nombre, sin_bd):
+    from src.seguridad.archivos import ArchivoInvalido, validar_imagen
+    with pytest.raises(ArchivoInvalido):
+        validar_imagen(contenido, nombre, {"id": 1, "correo": "a@b.co"})
+    assert sin_bd and sin_bd[-1][0] == "ARCHIVO_RECHAZADO"
+
+
+def test_extension_debe_coincidir_con_el_contenido(sin_bd):
+    from src.seguridad.archivos import ArchivoInvalido, validar_imagen
+    with pytest.raises(ArchivoInvalido):
+        validar_imagen(_png_valido(), "foto.jpg")                  # PNG disfrazado de JPG
+
+
+def test_imagen_demasiado_grande(sin_bd):
+    from src.seguridad.archivos import MAX_BYTES, ArchivoInvalido, validar_imagen
+    with pytest.raises(ArchivoInvalido):
+        validar_imagen(_png_valido() + b"0" * MAX_BYTES, "grande.png")
+
+
+@pytest.fixture
+def roles_bd(monkeypatch):
+    """Simula roles creados desde la interfaz sin tocar la base de datos."""
+    import time
+
+    from src.seguridad import permisos as p
+    roles = {"R_LECTOR_ALERTAS": ("Lector de alertas", "x"), "R_BAJAS": ("Bajas", "x")}
+    permisos = {"R_LECTOR_ALERTAS": {"alertas.ver", "dashboard.operativo"},
+                "R_BAJAS": {"inventario.baja", "inventario.ver"}}
+    monkeypatch.setitem(p._cache, "roles", roles)
+    monkeypatch.setitem(p._cache, "permisos", permisos)
+    monkeypatch.setitem(p._cache, "t", time.monotonic() + 3600)
+    return roles
+
+
+def test_rol_personalizado_tiene_sus_permisos(roles_bd):
+    from src.seguridad.permisos import ROLES, permisos_de_usuario, tiene_permiso
+    u = {"id": 1, "rol": "R_LECTOR_ALERTAS", "activo": 1}
+    assert "R_LECTOR_ALERTAS" in ROLES and ROLES["R_LECTOR_ALERTAS"][0] == "Lector de alertas"
+    assert permisos_de_usuario(u) == {"alertas.ver", "dashboard.operativo"}
+    assert tiene_permiso(u, "alertas.ver") and not tiene_permiso(u, "usuarios.gestionar")
+
+
+def test_dos_roles_suman_permisos(roles_bd):
+    from src.seguridad.permisos import permisos_de_usuario
+    u = {"id": 1, "rol": "R_LECTOR_ALERTAS", "activo": 1, "roles_extra": ["R_BAJAS", "AUDITOR"]}
+    efectivos = permisos_de_usuario(u)
+    assert {"alertas.ver", "inventario.baja", "auditoria.ver"} <= efectivos
+    sin_extras = permisos_de_usuario({**u, "roles_extra": []})
+    assert "inventario.baja" not in sin_extras           # quitar el rol quita sus permisos
+
+
+def test_visitante_ignora_roles_adicionales(roles_bd):
+    from src.seguridad.permisos import permisos_de_usuario
+    u = {"id": 1, "rol": "VISITANTE", "activo": 1, "modulos": "alertas", "roles_extra": ["ADMIN"]}
+    assert permisos_de_usuario(u) == {"alertas.ver"}
+
+
+def test_rol_adicional_visitante_no_concede(roles_bd):
+    from src.seguridad.permisos import permisos_de_usuario
+    u = {"id": 1, "rol": "AUDITOR", "activo": 1, "roles_extra": ["VISITANTE"]}
+    assert permisos_de_usuario(u) == permisos_de_usuario({**u, "roles_extra": []})
+
+
+def test_permiso_inventado_en_rol_no_concede(monkeypatch):
+    import time
+
+    from src.seguridad import permisos as p
+    monkeypatch.setitem(p._cache, "roles", {"R_X": ("X", "x")})
+    monkeypatch.setitem(p._cache, "permisos", {"R_X": {"alertas.ver"}})
+    monkeypatch.setitem(p._cache, "t", time.monotonic() + 3600)
+    assert p.permisos_de("R_X") == {"alertas.ver"}
+    assert p.permisos_de("R_NO_EXISTE") == set()
+
+
+def test_mfa_obligatorio_en_rol_personalizado_con_permiso_critico(roles_bd):
+    from src.seguridad.mfa import mfa_obligatorio
+    assert mfa_obligatorio("R_BAJAS")                       # incluye inventario.baja
+    assert not mfa_obligatorio("R_LECTOR_ALERTAS")
+    assert mfa_obligatorio("R_LECTOR_ALERTAS", ["ADMIN"])    # un rol adicional crítico también obliga
+
+
+def test_nadie_concede_permisos_que_no_tiene():
+    from src.servicios.errores import ErrorNegocio
+    from src.servicios.roles import _codigo, _exigir_alcance, _validar_permisos
+    jefe = {"id": 1, "rol": "REGENTE_FARMACIA", "activo": 1}
+    _exigir_alcance(jefe, {"inventario.baja"})
+    with pytest.raises(ErrorNegocio):
+        _exigir_alcance(jefe, {"usuarios.gestionar"})
+    with pytest.raises(ErrorNegocio):
+        _validar_permisos([])
+    with pytest.raises(ErrorNegocio):
+        _validar_permisos(["permiso.inventado"])
+    assert _codigo("Lector de Alertas Ñandú") == "R_LECTOR_DE_ALERTAS_NANDU"
+    assert _codigo("x" * 80).startswith("R_") and len(_codigo("x" * 80)) <= 30
+
+
+def test_sesion_sin_tabla_no_bloquea_el_ingreso(monkeypatch):
+    from src.seguridad import sesiones
+    monkeypatch.setattr(sesiones, "disponible", lambda: False)
+    assert sesiones.crear({"id": 1}) == ""
+    assert sesiones.vigente("", 1) is True
+    assert sesiones.vigente("token-cualquiera", 1) is True
+
+
+def test_registro_de_errores_va_a_la_tabla_sin_bucle(monkeypatch):
+    import logging
+    import sys
+
+    from src import registro_errores
+    guardados = []
+    monkeypatch.setattr("src.database.connection.ejecutar", lambda sql, params=(): guardados.append(params))
+    h = registro_errores._TablaErrores(level=logging.ERROR)
+    try:
+        raise RuntimeError("fallo forzado")
+    except RuntimeError:
+        rec = logging.LogRecord("app", logging.ERROR, __file__, 1, "Error en la vista %s", ("tablero",),
+                                sys.exc_info())
+    h.emit(rec)
+    assert guardados and guardados[0][0] == "ERROR" and "tablero" in guardados[0][2]
+    assert "RuntimeError" in guardados[0][3]
+
+    def falla(*a, **k):
+        raise ConnectionError("sin base de datos")
+    monkeypatch.setattr("src.database.connection.ejecutar", falla)
+    h.emit(rec)                                            # no debe lanzar ni recursar
+
+
+def test_login_rechaza_quince_caracteres_especiales():
+    from src.seguridad.correos import login_valido
+    assert not login_valido("!#$%&/()=?¡¿*{}[]")
+    assert not login_valido("' OR '1'='1")
+
+
+def test_secuencia_numerica_no_cumple_la_politica():
+    from src.seguridad.contrasenas import validar_politica
+    assert validar_politica("123456789101112131415")
+    assert validar_politica("a")                           # un solo carácter
+    assert not validar_politica("Carro#Paro2026")
+
+
+def test_pendiente_mfa_vence():
+    from datetime import datetime, timedelta
+
+    from src import config
+    from src.seguridad.mfa import pendiente_vencido
+    ahora = datetime.now()
+    assert not pendiente_vencido(ahora - timedelta(minutes=config.MFA_PENDIENTE_MINUTOS - 1), ahora)
+    assert pendiente_vencido(ahora - timedelta(minutes=config.MFA_PENDIENTE_MINUTOS + 1), ahora)
+    assert not pendiente_vencido(None, ahora)
+
+
+def test_mirilla_de_contrasena_oculta():
+    from app.componentes import OCULTAR_MIRILLA
+    assert "display:none" in OCULTAR_MIRILLA and "assword" in OCULTAR_MIRILLA

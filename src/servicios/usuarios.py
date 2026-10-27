@@ -4,7 +4,8 @@ import pandas as pd
 from src.database.auditoria import registrar_evento_seguridad, registrar_log
 from src.database.connection import consultar, consultar_df, ejecutar
 from src.seguridad.contrasenas import hash_password, validar_politica
-from src.seguridad.autenticacion import hay_columna_modulos
+from src.seguridad import sesiones
+from src.seguridad.autenticacion import hay_columna_modulos, hay_tabla
 from src.seguridad.permisos import MODULOS_VISITANTE, ROLES, exigir_permiso, tiene_permiso
 from src.servicios.errores import ErrorNegocio
 
@@ -12,12 +13,15 @@ from src.servicios.errores import ErrorNegocio
 def listar_usuarios(usuario: dict) -> pd.DataFrame:
     if not tiene_permiso(usuario, "usuarios.desbloquear"):
         exigir_permiso(usuario, "usuarios.gestionar")
+    columnas = ("id, nombre, correo, rol, activo, intentos_fallidos, bloqueado_hasta, "
+                "ultimo_acceso, debe_cambiar_password")
     if hay_columna_modulos():
-        return consultar_df("""SELECT id, nombre, correo, rol, activo, intentos_fallidos, bloqueado_hasta,
-                                      ultimo_acceso, debe_cambiar_password, modulos
-                               FROM usuarios ORDER BY nombre""")
-    return consultar_df("""SELECT id, nombre, correo, rol, activo, intentos_fallidos, bloqueado_hasta,
-                                  ultimo_acceso, debe_cambiar_password FROM usuarios ORDER BY nombre""")
+        columnas += ", modulos"
+    if hay_tabla("usuario_rol"):
+        columnas += (", (SELECT GROUP_CONCAT(ur.rol ORDER BY ur.rol) FROM usuario_rol ur "
+                     "WHERE ur.usuario_id = usuarios.id) AS roles_adicionales")
+    # Falso positivo B608: `columnas` se arma solo con literales de este módulo, nunca con datos de la persona.
+    return consultar_df(f"SELECT {columnas} FROM usuarios ORDER BY nombre")  # nosec B608
 
 
 def _normalizar_modulos(rol: str, modulos: list | None) -> str | None:
@@ -78,12 +82,18 @@ def cambiar_rol(usuario: dict, usuario_id: int, rol: str):
         raise ErrorNegocio("Rol inválido.")
     if usuario_id == usuario["id"]:
         raise ErrorNegocio("No puede cambiar su propio rol.")
+    anterior = consultar("SELECT rol FROM usuarios WHERE id = %s", (usuario_id,), uno=True)
     ejecutar("UPDATE usuarios SET rol = %s WHERE id = %s", (rol, usuario_id))
+    if hay_tabla("usuario_rol"):
+        # Si el rol nuevo ya era adicional, deja de serlo; y un Visitante no tiene roles adicionales
+        ejecutar("DELETE FROM usuario_rol WHERE usuario_id = %s AND (rol = %s OR %s = 'VISITANTE')",
+                 (usuario_id, rol, rol))
     if hay_columna_modulos():
         # Los módulos solo tienen sentido en un VISITANTE: al cambiar de rol se limpian,
         # para que no queden permisos olvidados si más adelante vuelve a ser visitante.
         ejecutar("UPDATE usuarios SET modulos = NULL WHERE id = %s", (usuario_id,))
-    registrar_log(usuario["id"], "CAMBIO_ROL", "usuarios", usuario_id, f"Nuevo rol: {rol}")
+    registrar_log(usuario["id"], "CAMBIO_ROL", "usuarios", usuario_id,
+                  f"Rol anterior: {(anterior or {}).get('rol', '?')}; nuevo rol: {rol}")
 
 
 def cambiar_modulos(usuario: dict, usuario_id: int, modulos: list):
@@ -93,8 +103,10 @@ def cambiar_modulos(usuario: dict, usuario_id: int, modulos: list):
     if not destino or destino["rol"] != "VISITANTE":
         raise ErrorNegocio("Solo las cuentas con rol Visitante tienen módulos asignados.")
     modulos_txt = _normalizar_modulos("VISITANTE", modulos)
+    antes = consultar("SELECT modulos FROM usuarios WHERE id = %s", (usuario_id,), uno=True) or {}
     ejecutar("UPDATE usuarios SET modulos = %s WHERE id = %s", (modulos_txt, usuario_id))
-    registrar_log(usuario["id"], "CAMBIO_MODULOS", "usuarios", usuario_id, f"Módulos: {modulos_txt}")
+    registrar_log(usuario["id"], "CAMBIO_MODULOS", "usuarios", usuario_id,
+                  f"Módulos antes: {antes.get('modulos') or '-'}; ahora: {modulos_txt}")
 
 
 def cambiar_estado(usuario: dict, usuario_id: int, activo: bool):
@@ -102,8 +114,11 @@ def cambiar_estado(usuario: dict, usuario_id: int, activo: bool):
     if usuario_id == usuario["id"]:
         raise ErrorNegocio("No puede desactivar su propia cuenta.")
     ejecutar("UPDATE usuarios SET activo = %s WHERE id = %s", (1 if activo else 0, usuario_id))
+    if not activo:
+        sesiones.cerrar_todas(usuario_id)
     registrar_log(usuario["id"], "ACTUALIZACION", "usuarios", usuario_id,
-                  "Activado" if activo else "Desactivado")
+                  "Estado anterior: " + ("inactivo" if activo else "activo") + "; ahora: "
+                  + ("activo" if activo else "inactivo"))
 
 
 def desbloquear(usuario: dict, usuario_id: int):
@@ -120,7 +135,9 @@ def restablecer_password(usuario: dict, usuario_id: int, temporal: str):
         raise ErrorNegocio(" ".join(errores))
     ejecutar("UPDATE usuarios SET password_hash = %s, debe_cambiar_password = 1 WHERE id = %s",
              (hash_password(temporal), usuario_id))
-    registrar_log(usuario["id"], "RESTABLECER_PASSWORD", "usuarios", usuario_id)
+    sesiones.cerrar_todas(usuario_id)
+    registrar_log(usuario["id"], "RESTABLECER_PASSWORD", "usuarios", usuario_id,
+                  "Contraseña temporal asignada por un administrador; cambio obligatorio en el próximo ingreso")
 
 
 def log_auditoria(usuario: dict, dias: int = 30) -> pd.DataFrame:
@@ -130,6 +147,12 @@ def log_auditoria(usuario: dict, dias: int = 30) -> pd.DataFrame:
                            FROM log_auditoria a LEFT JOIN usuarios u ON u.id = a.usuario_id
                            WHERE a.fecha >= DATE_SUB(NOW(), INTERVAL %s DAY)
                            ORDER BY a.fecha DESC""", (dias,))
+
+
+def errores_sistema(usuario: dict, dias: int = 7) -> pd.DataFrame:
+    exigir_permiso(usuario, "seguridad.ver")
+    from src.registro_errores import errores_recientes
+    return errores_recientes(dias)
 
 
 def eventos_seguridad(usuario: dict, dias: int = 30) -> pd.DataFrame:

@@ -34,6 +34,10 @@ from src.servicios import alertas as srv_alertas  # noqa: E402
 from src.servicios import inventario as srv_inv  # noqa: E402
 from src.servicios.errores import ErrorNegocio  # noqa: E402
 
+from src import registro_errores  # noqa: E402
+
+registro_errores.configurar()    # errores a data/logs/errores.log y a la tabla errores_sistema
+
 app = FastAPI(title="SMARTDATA 360 · Carro de Paro API", version="2.0",
               description="API del módulo Carro de Paro: inventario, alertas, analítica y agente IA.")
 # La app móvil corre en un WebView con su propio origen, así que necesita CORS.

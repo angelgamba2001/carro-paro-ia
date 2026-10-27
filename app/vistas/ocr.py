@@ -11,6 +11,7 @@ from app.vistas.inventario import _form_registro
 from src.database.auditoria import registrar_log
 from src.ocr.extractor_fechas import extraer_fecha_texto, extraer_lote
 from src.ocr.lector_imagen import leer_texto, ocr_disponible
+from src.seguridad.archivos import ArchivoInvalido, validar_imagen
 from src.seguridad.permisos import tiene_permiso
 from src.servicios import catalogo as srv_cat
 
@@ -102,6 +103,13 @@ def mostrar(usuario: dict):
         if not ocr_disponible():
             st.warning("EasyOCR no está instalado en este equipo (pip install easyocr). Use el modo de texto.")
         foto = st.file_uploader("Imagen JPG o PNG (máx. 10 MB)", type=["jpg", "jpeg", "png"])
+        if foto:
+            # La extensión la elige quien sube el archivo: se revisa el contenido antes de usarlo
+            try:
+                validar_imagen(foto.getvalue(), foto.name, usuario)
+            except ArchivoInvalido as e:
+                st.error(str(e))
+                return
         if foto and ocr_disponible():
             st.image(foto, width=320)
             with st.spinner("Leyendo etiqueta..."):

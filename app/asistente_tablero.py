@@ -92,6 +92,34 @@ def contexto(k: dict, ka: dict | None = None) -> str:
     return "\n".join(filas)
 
 
+def por_servicio(usuario: dict, texto: str) -> str | None:
+    """Cifras por servicio o área (vencidas, faltantes, riesgo), calculadas sin modelo de lenguaje.
+
+    Responde si la pregunta nombra un servicio o pide la comparación por áreas; si no, devuelve None.
+    """
+    if not any(c in texto for c in ("servicio", "area", "cirugia", "uci", "urgencias", "pediatria",
+                                    "hospitalizacion", "perdida", "vencid", "porcentaje")):
+        return None
+    try:
+        from src.agente.herramientas import ejecutar_herramienta
+        filas = ejecutar_herramienta(usuario, "comparar_servicios").get("comparacion") or []
+    except Exception:
+        return None
+    if not filas:
+        return None
+    mencionados = [f for f in filas if _norm(f["servicio"]) in texto
+                   or any(len(w) > 3 and w in texto for w in _norm(f["servicio"]).split())]
+    if not mencionados and not any(c in texto for c in ("servicio", "area", "compar")):
+        return None
+    elegidas = mencionados or filas
+    lineas = [f"- **{f['servicio']}:** {f['unidades_vencidas']} de {f['unidades_total']} unidades vencidas "
+              f"(**{numero(f['pct_vencido'])} %**), {f['unidades_por_vencer']} por vencer, "
+              f"{f['faltantes']} faltantes ({f['faltantes_criticos']} críticos)." for f in elegidas]
+    return ("Porcentaje de unidades vencidas sobre las que hay hoy en inventario, por servicio:\n\n"
+            + "\n".join(lineas)
+            + "\n\nEs la situación actual del inventario, no el acumulado de pérdidas de los últimos 12 meses.")
+
+
 def responder(usuario: dict, pregunta: str) -> str | None:
     k = datos.kpis(usuario, datos.firma(usuario))
     texto = _norm(pregunta)
@@ -99,6 +127,10 @@ def responder(usuario: dict, pregunta: str) -> str | None:
         return leyenda()
     if any(c in texto for c in ("prioridad", "primero", "urgente", "atender", "que hago")):
         return prioridades(k)
+    if tiene_permiso(usuario, "inventario.ver"):
+        r = por_servicio(usuario, texto)
+        if r:
+            return r
     ka = _historicos(usuario)
     if any(c in texto for c in ("resumen", "estado general", "como esta", "estadistic", "indicador", "kpi",
                                 "panorama", "cifras")):

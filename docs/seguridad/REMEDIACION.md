@@ -20,3 +20,8 @@ porque el frontend de Streamlit los necesita; debe validarse en el navegador tra
 - **Riesgo aceptado:** `script-src 'unsafe-inline'` y `style-src 'unsafe-inline'`. Streamlit inyecta un script en línea en su `index.html` y su biblioteca de estilos (emotion) genera estilos en línea; quitarlos deja la aplicación en blanco. Sustituirlos por hashes/nonces dependería de la versión exacta de Streamlit y no es mantenible. Mitigación: el resto de la política (`default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, `form-action 'self'`, `connect-src 'self'`) limita el impacto.
 - Divulgación de marcas de tiempo (Unix) en `emotion-styled...js` y `opacities...js`: falso positivo, son constantes numéricas de librerías públicas.
 - Aplicación Web Moderna: informativa.
+
+## Acceso desde otros dispositivos (celular, otra PC)
+El proxy debe reenviar `Host` con el puerto (`$http_host`), no `$host`: Streamlit compara `Host` y `Origin`
+al abrir el WebSocket y rechaza con 403 cuando no coinciden, lo que deja la página en la silueta gris de carga
+al entrar por una IP distinta de localhost.

@@ -8,7 +8,10 @@ contraseña: un código de un solo uso deja menos superficie que un enlace con
 permisos viajando por el correo.
 
 Condiciones:
-  * Solo funciona con cuentas que tengan algún segundo factor activo.
+  * Con segundo factor activo, el código sale de ese factor (aplicación, respaldo o correo).
+  * Sin segundo factor, se envía un código de un solo uso al correo registrado de la cuenta
+    (canal "correo_temporal"): quien controla el buzón puede recuperarla, como en cualquier
+    sistema con «Olvidé mi contraseña». Solo cuentas activas.
   * Los intentos fallidos usan el mismo contador de bloqueo que el ingreso normal.
   * Un código de respaldo se consume al usarlo, igual que al iniciar sesión.
   * El cambio queda en eventos_seguridad y en el log de auditoría.
@@ -47,13 +50,20 @@ def puede_restablecer(correo: str) -> Resultado:
         return Resultado(False, MENSAJE_GENERICO)
     if u["bloqueado_hasta"] and u["bloqueado_hasta"] > datetime.now():
         return Resultado(False, "La cuenta está bloqueada temporalmente. Intente más tarde.")
-    canal = canal_mfa(u["id"]) if u["activo"] else ""
-    if not canal:
-        registrar_evento_seguridad("RECUPERACION_SOLICITADA", correo, u["id"],
-                                   "Cuenta inactiva o sin segundo factor")
+    if not u["activo"]:
+        registrar_evento_seguridad("RECUPERACION_SOLICITADA", correo, u["id"], "Cuenta inactiva")
         return Resultado(False, MENSAJE_GENERICO)
+    canal = canal_mfa(u["id"]) or "correo_temporal"
     registrar_evento_seguridad("RECUPERACION_SOLICITADA", correo, u["id"], f"Cuenta apta ({canal})")
     return Resultado(True, usuario_id=u["id"], canal=canal)
+
+
+def _codigo_recuperacion(usuario_id: int, codigo: str) -> bool:
+    """Con segundo factor, vale cualquiera de sus códigos; sin él, solo el enviado al correo."""
+    if canal_mfa(usuario_id):
+        return _codigo_valido(usuario_id, codigo)
+    from src.seguridad.mfa_correo import verificar
+    return verificar(usuario_id, codigo)
 
 
 def restablecer(usuario_id: int, codigo: str, nueva: str, repetir: str) -> Resultado:
@@ -73,7 +83,7 @@ def restablecer(usuario_id: int, codigo: str, nueva: str, repetir: str) -> Resul
         return Resultado(False, "La contraseña no cumple la política.", errores=errores)
 
     # El código se valida al final para no gastar un código de respaldo por un error de tecleo
-    if not _codigo_valido(usuario_id, codigo):
+    if not _codigo_recuperacion(usuario_id, codigo):
         intentos = u["intentos_fallidos"] + 1
         if intentos >= config.MAX_INTENTOS_LOGIN:
             ejecutar("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = %s WHERE id = %s",
@@ -94,6 +104,8 @@ def restablecer(usuario_id: int, codigo: str, nueva: str, repetir: str) -> Resul
              (hash_password(nueva), usuario_id))
     registrar_evento_seguridad("RECUPERACION_EXITOSA", u["correo"], usuario_id,
                                "Contraseña restablecida con el segundo factor")
+    from src.seguridad import sesiones
+    sesiones.cerrar_todas(usuario_id)
     registrar_log(usuario_id, "RESTABLECER_PASSWORD", "usuarios", usuario_id,
                   "Restablecida por el propio usuario con el segundo factor")
     try:

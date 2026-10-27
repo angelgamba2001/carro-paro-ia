@@ -9,8 +9,14 @@ from src.servicios.errores import ErrorNegocio
 from app.estilos import APP, BASE, COLORES, MOVIL, SERIE  # noqa: F401
 
 
+# Quita la «mirilla» que deja ver la contraseña: con el texto visible podía copiarse y pegarse.
+# Sin ella el campo sigue siendo type="password", que el navegador no deja copiar.
+OCULTAR_MIRILLA = ('[data-testid="stTextInputRootElement"] button[aria-label*="assword"]'
+                   '{display:none !important}')
+
+
 def estilos():
-    st.markdown(f"<style>{BASE}{APP}{MOVIL}</style>", unsafe_allow_html=True)
+    st.markdown(f"<style>{BASE}{APP}{MOVIL}{OCULTAR_MIRILLA}</style>", unsafe_allow_html=True)
 
 
 

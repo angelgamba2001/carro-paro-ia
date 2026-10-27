@@ -12,6 +12,7 @@ python-dotenv>=1.0
 bcrypt>=4.1
 PyJWT>=2.8
 pyotp>=2.9            # segundo factor TOTP
+cryptography>=42.0   # cifrado del secreto TOTP
 qrcode[pil]>=7.4      # código QR para activar el segundo factor
 Pillow>=10.0          # imagen del código QR
 

@@ -583,3 +583,81 @@ def test_api_cors_solo_admite_los_origenes_declarados(bd):
     ajeno = c.options("/api/auth/login", headers={
         "Origin": "https://sitio-cualquiera.com", "Access-Control-Request-Method": "POST"})
     assert ajeno.headers.get("access-control-allow-origin") is None
+
+
+# ---------------- Controles de seguridad ampliados ----------------
+def _limpiar_pruebas():
+    from src.database.connection import ejecutar
+    ejecutar("DELETE FROM usuarios WHERE correo LIKE 'pytest-seg-%'")
+    ejecutar("DELETE FROM roles WHERE codigo LIKE 'R_PYTEST%'")
+
+
+def test_rol_personalizado_asignado_a_dos_personas_y_multirol(bd):
+    import uuid
+
+    from src.seguridad.permisos import invalidar_cache
+    from src.servicios import roles as srv_roles
+    from src.servicios import usuarios as srv_usr
+    admin = _login("admin@hospital.com")
+    _limpiar_pruebas()
+    try:
+        a = srv_roles.crear_rol(admin, "Pytest Lector", "prueba", ["alertas.ver", "inventario.ver"])
+        b = srv_roles.crear_rol(admin, "Pytest Bajas", "prueba", ["inventario.baja", "catalogo.gestionar"])
+        ids = [srv_usr.crear_usuario(admin, f"Prueba {i}", f"pytest-seg-{uuid.uuid4().hex[:8]}@hospital.com",
+                                     PW, a) for i in range(2)]
+        for i in ids:                                       # mismo rol para dos personas
+            assert srv_roles.permisos_efectivos(i) == {"alertas.ver", "inventario.ver"}
+        srv_roles.cambiar_roles_adicionales(admin, ids[0], [b, "AUDITOR"])   # dos roles más
+        efectivos = srv_roles.permisos_efectivos(ids[0])
+        assert {"alertas.ver", "inventario.baja", "auditoria.ver"} <= efectivos
+        assert srv_roles.permisos_efectivos(ids[1]) == {"alertas.ver", "inventario.ver"}
+        srv_roles.cambiar_permisos_rol(admin, a, ["alertas.ver"])           # se modifican sus permisos
+        invalidar_cache()
+        assert srv_roles.permisos_efectivos(ids[1]) == {"alertas.ver"}
+        with pytest.raises(Exception):
+            srv_roles.eliminar_rol(admin, a)                                # tiene personas asignadas
+    finally:
+        _limpiar_pruebas()
+        invalidar_cache()
+
+
+def test_correo_duplicado_se_rechaza(bd):
+    import uuid
+
+    from src.servicios import usuarios as srv_usr
+    from src.servicios.errores import ErrorNegocio
+    admin = _login("admin@hospital.com")
+    _limpiar_pruebas()
+    correo = f"pytest-seg-{uuid.uuid4().hex[:8]}@hospital.com"
+    try:
+        srv_usr.crear_usuario(admin, "Prueba", correo, PW, "ENFERMERO")
+        with pytest.raises(ErrorNegocio):
+            srv_usr.crear_usuario(admin, "Prueba 2", correo.upper(), PW, "ENFERMERO")
+    finally:
+        _limpiar_pruebas()
+
+
+def test_sesion_unica_cierra_la_anterior(bd):
+    from src.seguridad import sesiones
+    from src.servicios.errores import ErrorNegocio  # noqa: F401
+    u = _login("enfermero@hospital.com")
+    if not sesiones.disponible():
+        pytest.skip("Falta python scripts/migrar_seguridad.py")
+    primera = sesiones.crear(u)
+    segunda = sesiones.crear(u)
+    assert primera and segunda and primera != segunda
+    assert not sesiones.vigente(primera, u["id"])           # la primera quedó cerrada
+    assert sesiones.vigente(segunda, u["id"])
+    sesiones.cerrar(segunda)
+    assert not sesiones.vigente(segunda, u["id"])
+
+
+def test_totp_se_guarda_cifrado(bd):
+    from src.database.connection import consultar
+    from src.seguridad import mfa
+    u = _login("enfermero@hospital.com")
+    secreto, _ = mfa.iniciar_activacion(u["id"], u["correo"])
+    guardado = consultar("SELECT totp_secret FROM usuarios WHERE id = %s", (u["id"],), uno=True)["totp_secret"]
+    assert guardado.startswith("enc:") and secreto not in guardado
+    from src.database.connection import ejecutar
+    ejecutar("UPDATE usuarios SET totp_secret = NULL, mfa_activo = 0, mfa_confirmado = 0 WHERE id = %s", (u["id"],))
