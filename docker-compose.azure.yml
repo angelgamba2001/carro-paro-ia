@@ -1,0 +1,47 @@
+# Despliegue público en Azure (VM Linux). Se usa JUNTO con docker-compose.yml:
+#   sudo docker compose -f docker-compose.yml -f docker-compose.azure.yml up -d --build
+#
+# Qué cambia respecto al compose local:
+#  - MySQL (3307), API (8000) y nginx (8501) dejan de publicarse en la máquina:
+#    solo se alcanzan dentro de la red de contenedores.
+#  - Caddy queda como única puerta de entrada (80/443) y obtiene solo el
+#    certificado HTTPS de Let's Encrypt para el dominio de la VM.
+#  - La web sigue pasando por el nginx del proyecto (cabeceras de OWASP ZAP);
+#    /api, /docs y /openapi.json van directo a FastAPI, así la app móvil
+#    funciona con https://<dominio> sin abrir el puerto 8000.
+#
+# "!reset" requiere Docker Compose 2.24.4 o superior (el script de instalación
+# pone la versión actual).
+services:
+  mysql:
+    ports: !reset []
+    restart: unless-stopped
+
+  api:
+    ports: !reset []
+    restart: unless-stopped
+
+  proxy:
+    ports: !reset []
+    restart: unless-stopped
+
+  web:
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on: [proxy, api]
+    environment:
+      DOMINIO: ${DOMINIO:?Defina DOMINIO en el .env (p. ej. carro-paro-demo.eastus.cloudapp.azure.com)}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./despliegue/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_datos:/data      # certificados: no se pierden al recrear el contenedor
+      - caddy_config:/config
+
+volumes:
+  caddy_datos:
+  caddy_config:
