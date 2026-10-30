@@ -139,6 +139,17 @@ def mostrar(usuario: dict):
         if c2.button(etiqueta):
             accion(srv.cambiar_estado, usuario, uid, not bool(fila["activo"]), exito=f"Cuenta: {etiqueta.lower()}da.")
             st.rerun()
+        with st.expander("Eliminar cuenta"):
+            st.caption("Solo se pueden eliminar cuentas sin historial (por ejemplo, creadas por error). "
+                       "Si ya registró movimientos o alertas, desactívela. Esta acción no se puede deshacer.")
+            with st.form(f"eliminar_{uid}"):
+                escrito = st.text_input("Escriba el correo de la cuenta para confirmar",
+                                        placeholder=str(fila["correo"]))
+                if st.form_submit_button("Eliminar cuenta definitivamente"):
+                    accion(srv.eliminar_usuario, usuario, uid, escrito,
+                           exito=f"Cuenta {fila['correo']} eliminada.")
+                    if "mensaje_exito" in st.session_state:
+                        st.rerun()
         with st.form("reset_pw"):
             temporal = st.text_input("Nueva contraseña temporal", type="password")
             if st.form_submit_button("Restablecer contraseña"):

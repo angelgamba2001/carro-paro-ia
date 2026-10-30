@@ -350,3 +350,13 @@ def test_pendiente_mfa_vence():
 def test_mirilla_de_contrasena_oculta():
     from app.componentes import OCULTAR_MIRILLA
     assert "display:none" in OCULTAR_MIRILLA and "assword" in OCULTAR_MIRILLA
+
+
+def test_eliminar_usuario_exige_permiso():
+    import pytest
+
+    from src.seguridad.permisos import PermisoDenegado
+    from src.servicios import usuarios as srv
+    enfermero = {"id": 2, "rol": "ENFERMERO", "correo": "e@x.co", "nombre": "E", "roles_extra": []}
+    with pytest.raises(PermisoDenegado):
+        srv.eliminar_usuario(enfermero, 3, "z@x.co")

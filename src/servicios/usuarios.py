@@ -121,6 +121,38 @@ def cambiar_estado(usuario: dict, usuario_id: int, activo: bool):
                   + ("activo" if activo else "inactivo"))
 
 
+def eliminar_usuario(usuario: dict, usuario_id: int, correo_confirmado: str):
+    """Elimina una cuenta de forma definitiva. Solo procede si la cuenta no tiene historial
+    (movimientos, alertas, auditoría...): el historial clínico no debe perder a su autor, y en ese
+    caso lo correcto es desactivarla. El correo escrito debe coincidir con el de la cuenta."""
+    exigir_permiso(usuario, "usuarios.gestionar")
+    if usuario_id == usuario["id"]:
+        raise ErrorNegocio("No puede eliminar su propia cuenta.")
+    objetivo = consultar("SELECT id, correo, rol, activo FROM usuarios WHERE id = %s", (usuario_id,), uno=True)
+    if not objetivo:
+        raise ErrorNegocio("La cuenta ya no existe.")
+    if (correo_confirmado or "").strip().lower() != objetivo["correo"].lower():
+        raise ErrorNegocio("El correo escrito no coincide con el de la cuenta; no se eliminó nada.")
+    if objetivo["rol"] == "ADMIN" and objetivo["activo"]:
+        restantes = consultar("SELECT COUNT(*) AS n FROM usuarios WHERE rol = 'ADMIN' "
+                              "AND activo = 1 AND id <> %s", (usuario_id,), uno=True)["n"]
+        if not restantes:
+            raise ErrorNegocio("No se puede eliminar al último administrador activo.")
+    sesiones.cerrar_todas(usuario_id)
+    for tabla in ("usuario_rol", "sesiones_activas", "cambios_correo"):
+        if hay_tabla(tabla):
+            ejecutar(f"DELETE FROM {tabla} WHERE usuario_id = %s", (usuario_id,))  # nosec B608 - tabla fija
+    try:
+        ejecutar("DELETE FROM usuarios WHERE id = %s", (usuario_id,))
+    except Exception as e:
+        if "1451" in str(e) or "foreign key" in str(e).lower():
+            raise ErrorNegocio("Esta cuenta tiene historial (movimientos, alertas o auditoría) y no puede "
+                               "eliminarse sin perderlo. Desactívela en su lugar.") from e
+        raise
+    registrar_log(usuario["id"], "ELIMINAR_USUARIO", "usuarios", usuario_id,
+                  f"Cuenta eliminada: {objetivo['correo']} (rol {objetivo['rol']})")
+
+
 def desbloquear(usuario: dict, usuario_id: int):
     exigir_permiso(usuario, "usuarios.desbloquear")
     ejecutar("UPDATE usuarios SET bloqueado_hasta = NULL, intentos_fallidos = 0 WHERE id = %s", (usuario_id,))
