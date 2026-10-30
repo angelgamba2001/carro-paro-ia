@@ -1,0 +1,5 @@
+# Lectura OCR de etiquetas (opcional). src/ocr/lector_imagen.py la carga solo al usarla.
+# torch/torchvision se instalan ANTES desde el índice de CPU (ver Dockerfile), así
+# easyocr no arrastra la versión con CUDA de más de 2 GB.
+easyocr>=1.7,<2
+opencv-python-headless>=4.8,<5

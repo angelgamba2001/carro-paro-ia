@@ -1,0 +1,4 @@
+# Archivos que se ejecutan en Linux (VM de Azure / contenedores): siempre con fin de linea LF
+*.sh text eol=lf
+despliegue/Caddyfile text eol=lf
+despliegue/nginx.conf text eol=lf

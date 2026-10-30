@@ -1,0 +1,20 @@
+# Entrada pública con HTTPS automático (Let's Encrypt). El dominio sale del .env.
+{$DOMINIO} {
+	encode zstd gzip
+
+	# API REST: app móvil y documentación interactiva
+	@api path /api/* /docs /docs/* /openapi.json /redoc
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# Aplicación web: pasa por el nginx del proyecto, que añade las cabeceras de seguridad
+	handle {
+		reverse_proxy proxy:8501
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}

@@ -1,0 +1,3 @@
+# Voz del agente (opcional). src/agente/voz.py la detecta: si falta, el micrófono no aparece.
+faster-whisper>=1.0,<2   # transcripción local en CPU (modelo "small", int8)
+edge-tts>=6.1            # síntesis de voz de la respuesta

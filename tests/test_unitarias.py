@@ -352,6 +352,32 @@ def test_mirilla_de_contrasena_oculta():
     assert "display:none" in OCULTAR_MIRILLA and "assword" in OCULTAR_MIRILLA
 
 
+# --- Correcciones de la lista de 20 pruebas de seguridad -------------------------------
+
+def test_permisos_individuales_se_suman_al_rol():
+    from src.seguridad.permisos import permisos_de_usuario
+    base = permisos_de_usuario({"rol": "ENFERMERO", "activo": 1})
+    con = permisos_de_usuario({"rol": "ENFERMERO", "activo": 1,
+                               "permisos_extra": ["usuarios.gestionar", "permiso.inventado"]})
+    assert "usuarios.gestionar" not in base
+    assert "usuarios.gestionar" in con
+    assert "permiso.inventado" not in con          # una clave alterada nunca concede nada
+
+
+def test_ajustes_de_expiracion_respetan_el_rango(monkeypatch):
+    from src.seguridad import ajustes
+    monkeypatch.setattr(ajustes, "_leer", lambda: {"MINUTOS_INACTIVIDAD": "5", "JWT_MINUTOS_EXPIRACION": "99999"})
+    assert ajustes.minutos_inactividad() == 5
+    assert ajustes.minutos_jwt() == ajustes.por_defecto("JWT_MINUTOS_EXPIRACION")   # fuera de rango -> .env
+    monkeypatch.setattr(ajustes, "_leer", lambda: {})
+    assert ajustes.minutos_inactividad() == ajustes.por_defecto("MINUTOS_INACTIVIDAD")
+
+
+def test_pantalla_de_acceso_oculta_la_mirilla():
+    from app.estilos import BASE
+    assert "stTextInputRevealButton" in BASE and "display: none" in BASE
+
+
 def test_eliminar_usuario_exige_permiso():
     import pytest
 

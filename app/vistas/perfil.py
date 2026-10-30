@@ -323,6 +323,9 @@ def _permisos(usuario: dict):
     extras = [ROLES[r][0] for r in usuario.get("roles_extra") or [] if r in ROLES]
     if extras:
         st.caption("Roles adicionales: " + ", ".join(extras))
+    individuales = [p for p in usuario.get("permisos_extra") or [] if p in PERMISOS]
+    if individuales:
+        st.caption("Permisos individuales: " + ", ".join(individuales))
     filas = "".join(f'<div class="permiso-fila"><code>{p}</code><span>{PERMISOS[p]}</span></div>'
                     for p in sorted(permisos_de_usuario(usuario)))
     st.markdown(filas, unsafe_allow_html=True)

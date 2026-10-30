@@ -131,6 +131,12 @@ button[data-testid="stBaseButton-primaryFormSubmit"]:focus-visible {{
   outline-color: var(--tinta);
 }}
 
+/* Los campos de contraseña no se pueden revelar: sin el botón del ojo, el valor
+   nunca queda en claro en pantalla ni se puede copiar. */
+[data-testid="stTextInputRevealButton"],
+[data-baseweb="input"] button[aria-label="Show password"],
+[data-baseweb="input"] button[aria-label="Hide password"] {{ display: none !important; }}
+
 @media (prefers-reduced-motion: reduce) {{
   *, *::before, *::after {{ animation: none !important; transition: none !important; }}
 }}
