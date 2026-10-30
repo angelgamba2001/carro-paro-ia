@@ -14,7 +14,10 @@ def _roles_personalizados(usuario: dict):
     except Exception:                                  # noqa: BLE001  (falta aplicar la migración)
         st.warning("Falta aplicar la migración de seguridad: python scripts/migrar_seguridad.py")
         return
-    with st.expander(f"Roles personalizados ({len(roles)})"):
+    # Sección fija (no un expander): un expander de Streamlit se cierra en cada cambio de
+    # los selectores de adentro y obligaba a reabrirlo para terminar de editar un rol.
+    st.markdown(f"#### Roles personalizados ({len(roles)})")
+    with st.container(border=True):
         if roles:
             st.dataframe([{"rol": r["nombre"], "permisos": ", ".join(r["permisos"]),
                            "personas": r["usuarios"]} for r in roles], hide_index=True, width="stretch")
@@ -113,7 +116,8 @@ def mostrar(usuario: dict):
             st.caption("Esta cuenta se registró por su cuenta y todavía no tiene perfil. "
                        "Puede asignárselo aquí o desde *Solicitudes de acceso*.")
         nuevo_rol = st.selectbox("Rol", claves, index=actual,
-                                 format_func=lambda r: ROLES[r][0], key="rol_edit")
+                                 format_func=lambda r: ROLES[r][0], key=f"rol_edit_{uid}")  # una clave por cuenta:
+        # con una clave fija, Streamlit conservaba el rol elegido para la cuenta anterior
         c1, c2 = st.columns(2)
         if c1.button("Cambiar rol"):
             accion(srv.cambiar_rol, usuario, uid, nuevo_rol, exito="Rol actualizado.")
@@ -133,6 +137,17 @@ def mostrar(usuario: dict):
                                     format_func=lambda r: ROLES[r][0])
             if st.button("Guardar roles adicionales"):
                 accion(srv_roles.cambiar_roles_adicionales, usuario, uid, extras, exito="Roles adicionales actualizados.")
+                if "mensaje_exito" in st.session_state:
+                    st.rerun()
+            crudo_p = fila.get("permisos_individuales")
+            actuales_p = [p for p in (crudo_p.split(",") if isinstance(crudo_p, str) else []) if p in PERMISOS]
+            individuales = st.multiselect(
+                "Permisos individuales (se suman a los de sus roles)", list(PERMISOS), default=actuales_p,
+                key=f"permisos_ind_{uid}", format_func=lambda p: f"{p} — {PERMISOS[p]}",
+                help="Permiten que dos personas con el mismo rol tengan permisos distintos.")
+            if st.button("Guardar permisos individuales"):
+                accion(srv_roles.cambiar_permisos_individuales, usuario, uid, individuales,
+                       exito="Permisos individuales actualizados.")
                 if "mensaje_exito" in st.session_state:
                     st.rerun()
         etiqueta = "Desactivar" if fila["activo"] else "Activar"

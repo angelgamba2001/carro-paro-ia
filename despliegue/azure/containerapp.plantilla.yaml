@@ -27,6 +27,7 @@ properties:
       - {name: db-password, value: "__DB_PASSWORD__"}
       - {name: jwt-secreto, value: "__JWT__"}
       - {name: clave-cifrado, value: "__FERNET__"}
+      - {name: llm-api-key, value: "__LLM_KEY__"}
   template:
     scale:
       minReplicas: 1
@@ -56,7 +57,11 @@ properties:
           - {name: JWT_SECRETO, secretRef: jwt-secreto}
           - {name: CLAVE_CIFRADO, secretRef: clave-cifrado}
           - {name: MOTOR_BIGDATA, value: pandas}
-          - {name: AGENTE_PROVEEDOR, value: reglas}
+          - {name: AGENTE_PROVEEDOR, value: "__AGENTE_PROVEEDOR__"}
+          - {name: LLM_URL, value: "__LLM_URL__"}
+          - {name: LLM_MODELO, value: "__LLM_MODELO__"}
+          - {name: LLM_API_KEY, secretRef: llm-api-key}
+          - {name: LLM_TIMEOUT, value: "60"}
           - {name: REGISTRO_ABIERTO, value: "true"}
           - {name: CORREO_MODO, value: archivo}
           - {name: MS_REDIRECT_URI, value: "https://__FQDN__"}
@@ -77,7 +82,11 @@ properties:
           - {name: JWT_SECRETO, secretRef: jwt-secreto}
           - {name: CLAVE_CIFRADO, secretRef: clave-cifrado}
           - {name: MOTOR_BIGDATA, value: pandas}
-          - {name: AGENTE_PROVEEDOR, value: reglas}
+          - {name: AGENTE_PROVEEDOR, value: "__AGENTE_PROVEEDOR__"}
+          - {name: LLM_URL, value: "__LLM_URL__"}
+          - {name: LLM_MODELO, value: "__LLM_MODELO__"}
+          - {name: LLM_API_KEY, secretRef: llm-api-key}
+          - {name: LLM_TIMEOUT, value: "60"}
           - {name: REGISTRO_ABIERTO, value: "true"}
           - {name: CORREO_MODO, value: archivo}
           - {name: MS_REDIRECT_URI, value: "https://__FQDN__"}

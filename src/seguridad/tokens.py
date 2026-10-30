@@ -21,7 +21,8 @@ def emitir_token(usuario: dict, mfa_pendiente: bool = False) -> str:
     """mfa_pendiente=True emite un token temporal (5 min) que SOLO sirve para enviar
     el código del segundo factor; no da acceso a ningún recurso."""
     ahora = datetime.now(timezone.utc)
-    minutos = 5 if mfa_pendiente else config.JWT_MINUTOS_EXPIRACION
+    from src.seguridad.ajustes import minutos_jwt      # lo puede cambiar el admin sin reiniciar
+    minutos = 5 if mfa_pendiente else minutos_jwt()
     payload = {
         "sub": str(usuario["id"]),
         "rol": usuario["rol"],       # sin datos personales en el token

@@ -3,9 +3,8 @@ from datetime import datetime, timedelta
 
 import streamlit as st
 
-from src import config
 from src.database.auditoria import registrar_evento_seguridad
-from src.seguridad import sesiones
+from src.seguridad import ajustes, sesiones
 from src.seguridad.autenticacion import revalidar_usuario
 
 
@@ -14,9 +13,10 @@ def usuario_en_sesion() -> dict | None:
     if not u:
         return None
     ultima = st.session_state.get("ultima_actividad")
-    if ultima and datetime.now() - ultima > timedelta(minutes=config.MINUTOS_INACTIVIDAD):
+    minutos = ajustes.minutos_inactividad()
+    if ultima and datetime.now() - ultima > timedelta(minutes=minutos):
         registrar_evento_seguridad("SESION_EXPIRADA", u["correo"], u["id"])
-        cerrar_sesion(motivo=f"La sesión expiró tras {config.MINUTOS_INACTIVIDAD} minutos de inactividad.")
+        cerrar_sesion(motivo=f"La sesión expiró tras {minutos} minutos de inactividad.")
         return None
     if not sesiones.vigente(st.session_state.get("token_sesion", ""), u["id"]):
         cerrar_sesion(motivo="Su sesión se cerró porque se inició en otro lugar o fue cerrada.")

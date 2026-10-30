@@ -105,11 +105,28 @@ $jwt    = -join ((Get-BytesAleatorios 32) | ForEach-Object { $_.ToString("x2") }
 $fernet = [Convert]::ToBase64String((Get-BytesAleatorios 32)).Replace('+', '-').Replace('/', '_')
 $acrPass = az acr credential show -n $acr --query "passwords[0].value" -o tsv
 
+# Agente: si en el grupo hay un Azure OpenAI con un modelo desplegado (ver
+# activar_llm_azure_openai.ps1), se usa; si no, el motor de reglas.
+$proveedor = "reglas"; $llmUrl = ""; $llmModelo = ""; $llmKey = "sin-clave"
+$aoai = az cognitiveservices account list -g $Grupo --query "[?kind=='OpenAI'].name | [0]" -o tsv
+if ($aoai) {
+    $llmModelo = az cognitiveservices account deployment list -n $aoai -g $Grupo --query "[0].name" -o tsv
+    if ($llmModelo) {
+        $proveedor = "llm"
+        $llmUrl = (az cognitiveservices account show -n $aoai -g $Grupo --query properties.endpoint -o tsv).TrimEnd("/") + "/openai/v1"
+        $llmKey = az cognitiveservices account keys list -n $aoai -g $Grupo --query key1 -o tsv
+        Write-Host "    Agente con LLM: $llmModelo ($aoai)"
+    }
+}
+if ($proveedor -eq "reglas") { Write-Host "    Agente con motor de reglas (no hay Azure OpenAI desplegado)" }
+
 $yaml = (Get-Content (Join-Path $raiz "despliegue\azure\containerapp.plantilla.yaml") -Raw)
 $yaml = $yaml.Replace('__REGION__', $Region).Replace('__APP__', $App).Replace('__ENV_ID__', $envId)
 $yaml = $yaml.Replace('__ACR_USUARIO__', $acr).Replace('__ACR_PASSWORD__', $acrPass).Replace('__ACR__', $acrServidor)
 $yaml = $yaml.Replace('__TAG__', $tag).Replace('__DB_PASSWORD__', $dbPass).Replace('__JWT__', $jwt)
 $yaml = $yaml.Replace('__FERNET__', $fernet).Replace('__FQDN__', $fqdn)
+$yaml = $yaml.Replace('__AGENTE_PROVEEDOR__', $proveedor).Replace('__LLM_URL__', $llmUrl).Replace('__LLM_MODELO__', $llmModelo).Replace('__LLM_KEY__', $llmKey)
+$llmKey = $null
 $archivoYaml = Join-Path $env:TEMP "carro-paro-app.yaml"
 [IO.File]::WriteAllText($archivoYaml, $yaml)
 

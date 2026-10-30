@@ -154,6 +154,18 @@ def roles_adicionales(usuario_id: int) -> list[str]:
         return []
 
 
+def permisos_individuales(usuario_id: int) -> list[str]:
+    """Permisos asignados directamente a una persona, además de los de sus roles
+    (tabla usuario_permiso). Solo se aceptan claves del catálogo PERMISOS."""
+    try:
+        from src.database.connection import consultar
+        filas = consultar("SELECT permiso FROM usuario_permiso WHERE usuario_id = %s ORDER BY permiso",
+                          (usuario_id,)) or []
+        return [f["permiso"] for f in filas if f["permiso"] in PERMISOS]
+    except Exception:                                                 # noqa: BLE001
+        return []
+
+
 class PermisoDenegado(Exception):
     """El rol del usuario no tiene el permiso requerido (equivale a HTTP 403)."""
 
@@ -190,6 +202,10 @@ def permisos_de_usuario(usuario: dict | None) -> set:
         for extra in extras:
             if extra != "VISITANTE":
                 permisos |= permisos_de(extra)
+    # Permisos individuales: se suman a los de los roles. Nunca se aceptan claves desconocidas.
+    individuales = usuario.get("permisos_extra") or []
+    if isinstance(individuales, (list, tuple, set)):
+        permisos |= {p for p in individuales if p in PERMISOS}
     return permisos
 
 

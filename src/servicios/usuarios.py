@@ -20,6 +20,9 @@ def listar_usuarios(usuario: dict) -> pd.DataFrame:
     if hay_tabla("usuario_rol"):
         columnas += (", (SELECT GROUP_CONCAT(ur.rol ORDER BY ur.rol) FROM usuario_rol ur "
                      "WHERE ur.usuario_id = usuarios.id) AS roles_adicionales")
+    if hay_tabla("usuario_permiso"):
+        columnas += (", (SELECT GROUP_CONCAT(up.permiso ORDER BY up.permiso) FROM usuario_permiso up "
+                     "WHERE up.usuario_id = usuarios.id) AS permisos_individuales")
     # Falso positivo B608: `columnas` se arma solo con literales de este módulo, nunca con datos de la persona.
     return consultar_df(f"SELECT {columnas} FROM usuarios ORDER BY nombre")  # nosec B608
 
@@ -159,3 +162,43 @@ def eventos_seguridad(usuario: dict, dias: int = 30) -> pd.DataFrame:
     exigir_permiso(usuario, "seguridad.ver")
     return consultar_df("""SELECT fecha, tipo, correo, origen, detalle FROM eventos_seguridad
                            WHERE fecha >= DATE_SUB(NOW(), INTERVAL %s DAY) ORDER BY fecha DESC""", (dias,))
+
+
+def generar_error_prueba(usuario: dict):
+    """Provoca un error controlado para demostrar que el registro de errores funciona.
+    No toca datos: lanza y captura una excepción y la deja en errores_sistema y en errores.log."""
+    exigir_permiso(usuario, "usuarios.gestionar")
+    registrar_log(usuario["id"], "PRUEBA_REGISTRO_ERRORES", "errores_sistema", None,
+                  "Error controlado generado desde Auditoría y seguridad")
+    try:
+        raise RuntimeError("Error de prueba generado a propósito desde «Auditoría y seguridad»")
+    except RuntimeError:
+        logging.getLogger("prueba_registro_errores").exception(
+            "Fallo simulado para verificar el registro de errores (usuario %s)", usuario["id"])
+
+
+def correos_simulados(usuario: dict, limite: int = 30) -> list[dict]:
+    """Bandeja de los correos que el sistema habría enviado (solo con CORREO_MODO=archivo).
+    Sirve para demostrar los flujos con código (restablecer contraseña, cambio de correo,
+    registro) sin un servidor de correo. Solo la ve quien puede ver la seguridad."""
+    import re
+    from datetime import datetime
+    from src.servicios.correo import SALIENTE
+    exigir_permiso(usuario, "seguridad.ver")
+    if not SALIENTE.exists():
+        return []
+    cabecera = re.compile(r"<!-- Para: (.*?) \| Asunto: (.*?) \|")
+    codigo = re.compile(r'text-align:center;">\s*([\d\s]{6,20}?)\s*</div>')
+    salida = []
+    archivos = sorted(SALIENTE.glob("*.html"), key=lambda f: f.stat().st_mtime, reverse=True)[:limite]
+    for archivo in archivos:
+        texto = archivo.read_text(encoding="utf-8", errors="replace")
+        c = cabecera.search(texto)
+        k = codigo.search(texto)
+        salida.append({
+            "fecha": datetime.fromtimestamp(archivo.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            "para": c.group(1) if c else "?",
+            "asunto": c.group(2) if c else "?",
+            "codigo": "".join(k.group(1).split()) if k else "",
+        })
+    return salida
