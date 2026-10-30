@@ -166,6 +166,18 @@ def permisos_individuales(usuario_id: int) -> list[str]:
         return []
 
 
+def permisos_quitados(usuario_id: int) -> list[str]:
+    """Permisos que se le retiran a una persona aunque su rol los tenga
+    (tabla usuario_permiso_quitado). Sin la tabla, ninguno."""
+    try:
+        from src.database.connection import consultar
+        filas = consultar("SELECT permiso FROM usuario_permiso_quitado WHERE usuario_id = %s ORDER BY permiso",
+                          (usuario_id,)) or []
+        return [f["permiso"] for f in filas if f["permiso"] in PERMISOS]
+    except Exception:                                                 # noqa: BLE001
+        return []
+
+
 class PermisoDenegado(Exception):
     """El rol del usuario no tiene el permiso requerido (equivale a HTTP 403)."""
 
@@ -206,6 +218,10 @@ def permisos_de_usuario(usuario: dict | None) -> set:
     individuales = usuario.get("permisos_extra") or []
     if isinstance(individuales, (list, tuple, set)):
         permisos |= {p for p in individuales if p in PERMISOS}
+    # Permisos quitados: se restan al final, así que ganan sobre roles y permisos individuales.
+    quitados = usuario.get("permisos_quitados") or []
+    if isinstance(quitados, (list, tuple, set)):
+        permisos -= {p for p in quitados if p in PERMISOS}
     return permisos
 
 

@@ -23,6 +23,9 @@ def listar_usuarios(usuario: dict) -> pd.DataFrame:
     if hay_tabla("usuario_permiso"):
         columnas += (", (SELECT GROUP_CONCAT(up.permiso ORDER BY up.permiso) FROM usuario_permiso up "
                      "WHERE up.usuario_id = usuarios.id) AS permisos_individuales")
+    if hay_tabla("usuario_permiso_quitado"):
+        columnas += (", (SELECT GROUP_CONCAT(pq.permiso ORDER BY pq.permiso) FROM usuario_permiso_quitado pq "
+                     "WHERE pq.usuario_id = usuarios.id) AS permisos_quitados")
     # Falso positivo B608: `columnas` se arma solo con literales de este módulo, nunca con datos de la persona.
     return consultar_df(f"SELECT {columnas} FROM usuarios ORDER BY nombre")  # nosec B608
 
@@ -142,7 +145,7 @@ def eliminar_usuario(usuario: dict, usuario_id: int, correo_confirmado: str):
         if not restantes:
             raise ErrorNegocio("No se puede eliminar al último administrador activo.")
     sesiones.cerrar_todas(usuario_id)
-    for tabla in ("usuario_rol", "sesiones_activas", "cambios_correo"):
+    for tabla in ("usuario_rol", "sesiones_activas", "cambios_correo", "usuario_permiso_quitado", "usuario_permiso"):
         if hay_tabla(tabla):
             ejecutar(f"DELETE FROM {tabla} WHERE usuario_id = %s", (usuario_id,))  # nosec B608 - tabla fija
     try:

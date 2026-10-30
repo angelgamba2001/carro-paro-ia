@@ -10,7 +10,7 @@ from src import config
 from src.database.auditoria import registrar_evento_seguridad
 from src.database.connection import consultar, ejecutar
 from src.seguridad import correos
-from src.seguridad.permisos import permisos_individuales, roles_adicionales
+from src.seguridad.permisos import permisos_individuales, permisos_quitados, roles_adicionales
 from src.seguridad.contrasenas import hash_password, validar_politica, verificar_password
 
 MENSAJE_GENERICO = "Correo o contraseña incorrectos."
@@ -79,6 +79,7 @@ def _publico(u: dict) -> dict:
     publico["modulos"] = u.get("modulos")      # solo lo usan las cuentas VISITANTE
     publico["roles_extra"] = roles_adicionales(u["id"])      # roles adicionales (tabla usuario_rol)
     publico["permisos_extra"] = permisos_individuales(u["id"])  # permisos individuales (tabla usuario_permiso)
+    publico["permisos_quitados"] = permisos_quitados(u["id"])  # permisos retirados (tabla usuario_permiso_quitado)
     return publico
 
 

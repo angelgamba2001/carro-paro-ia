@@ -150,6 +150,17 @@ def mostrar(usuario: dict):
                        exito="Permisos individuales actualizados.")
                 if "mensaje_exito" in st.session_state:
                     st.rerun()
+            crudo_q = fila.get("permisos_quitados")
+            actuales_q = [p for p in (crudo_q.split(",") if isinstance(crudo_q, str) else []) if p in PERMISOS]
+            quitados = st.multiselect(
+                "Permisos que se le quitan (restan a los de sus roles)", list(PERMISOS), default=actuales_q,
+                key=f"permisos_quit_{uid}", format_func=lambda p: f"{p} — {PERMISOS[p]}",
+                help="Quita permisos concretos a esta persona aunque su rol los tenga. Ganan sobre los demás.")
+            if st.button("Guardar permisos quitados"):
+                accion(srv_roles.cambiar_permisos_quitados, usuario, uid, quitados,
+                       exito="Permisos quitados actualizados.")
+                if "mensaje_exito" in st.session_state:
+                    st.rerun()
         etiqueta = "Desactivar" if fila["activo"] else "Activar"
         if c2.button(etiqueta):
             accion(srv.cambiar_estado, usuario, uid, not bool(fila["activo"]), exito=f"Cuenta: {etiqueta.lower()}da.")

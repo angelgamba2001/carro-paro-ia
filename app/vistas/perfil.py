@@ -326,6 +326,9 @@ def _permisos(usuario: dict):
     individuales = [p for p in usuario.get("permisos_extra") or [] if p in PERMISOS]
     if individuales:
         st.caption("Permisos individuales: " + ", ".join(individuales))
+    retirados = [p for p in usuario.get("permisos_quitados") or [] if p in PERMISOS]
+    if retirados:
+        st.caption("Permisos retirados: " + ", ".join(retirados))
     filas = "".join(f'<div class="permiso-fila"><code>{p}</code><span>{PERMISOS[p]}</span></div>'
                     for p in sorted(permisos_de_usuario(usuario)))
     st.markdown(filas, unsafe_allow_html=True)

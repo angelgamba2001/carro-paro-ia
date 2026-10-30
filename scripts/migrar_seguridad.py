@@ -22,6 +22,15 @@ from src.database.connection import conexion, consultar, ejecutar   # noqa: E402
 from src.seguridad.cifrado import cifrar, esta_cifrado               # noqa: E402
 
 TABLAS = {
+    "usuario_permiso_quitado": """
+        CREATE TABLE IF NOT EXISTS usuario_permiso_quitado (
+            usuario_id INT NOT NULL,
+            permiso    VARCHAR(60) NOT NULL,
+            fecha      DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (usuario_id, permiso),
+            CONSTRAINT fk_permiso_quitado_usuario FOREIGN KEY (usuario_id)
+                REFERENCES usuarios(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB""",
     "usuario_permiso": """
         CREATE TABLE IF NOT EXISTS usuario_permiso (
             usuario_id INT NOT NULL,

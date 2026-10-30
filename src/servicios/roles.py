@@ -165,12 +165,39 @@ def cambiar_permisos_individuales(usuario: dict, usuario_id: int, permisos: list
                   f"antes [{', '.join(anteriores) or '-'}] -> ahora [{', '.join(sorted(elegidos)) or '-'}]")
 
 
+def cambiar_permisos_quitados(usuario: dict, usuario_id: int, permisos: list):
+    """Retira permisos concretos a una persona aunque su rol los tenga (por ejemplo, un Enfermero
+    que no deba dar de baja lotes). Complementa a los permisos individuales, que solo suman."""
+    exigir_permiso(usuario, "usuarios.gestionar")
+    if usuario_id == usuario["id"]:
+        raise ErrorNegocio("No puede cambiar sus propios permisos.")
+    destino = consultar("SELECT rol FROM usuarios WHERE id = %s", (usuario_id,), uno=True)
+    if not destino:
+        raise ErrorNegocio("La cuenta no existe.")
+    if destino["rol"] == "VISITANTE":
+        raise ErrorNegocio("Una cuenta Visitante no admite permisos individuales: se le abren módulos.")
+    if destino["rol"] == "ADMIN":
+        raise ErrorNegocio("A un administrador no se le retiran permisos sueltos: cámbiele el rol.")
+    elegidos = list(dict.fromkeys(permisos or []))
+    desconocidos = [p for p in elegidos if p not in PERMISOS]
+    if desconocidos:
+        raise ErrorNegocio("Permiso desconocido: " + ", ".join(sorted(desconocidos)))
+    anteriores = [f["permiso"] for f in consultar(
+        "SELECT permiso FROM usuario_permiso_quitado WHERE usuario_id = %s ORDER BY permiso", (usuario_id,)) or []]
+    ejecutar("DELETE FROM usuario_permiso_quitado WHERE usuario_id = %s", (usuario_id,))
+    for p in elegidos:
+        ejecutar("INSERT INTO usuario_permiso_quitado (usuario_id, permiso) VALUES (%s,%s)", (usuario_id, p))
+    registrar_log(usuario["id"], "CAMBIO_PERMISOS_QUITADOS", "usuarios", usuario_id,
+                  f"antes [{', '.join(anteriores) or '-'}] -> ahora [{', '.join(sorted(elegidos)) or '-'}]")
+
+
 def permisos_efectivos(usuario_id: int) -> set:
     """Permisos de una persona (útil para mostrar y para pruebas)."""
-    from src.seguridad.permisos import permisos_individuales, roles_adicionales
+    from src.seguridad.permisos import permisos_individuales, permisos_quitados, roles_adicionales
     u = consultar("SELECT rol FROM usuarios WHERE id = %s", (usuario_id,), uno=True)
     if not u:
         return set()
     return permisos_de_usuario({"rol": u["rol"], "activo": 1, "roles_extra": roles_adicionales(usuario_id),
-                                "permisos_extra": permisos_individuales(usuario_id)})
+                                "permisos_extra": permisos_individuales(usuario_id),
+                                "permisos_quitados": permisos_quitados(usuario_id)})
 

@@ -386,3 +386,24 @@ def test_eliminar_usuario_exige_permiso():
     enfermero = {"id": 2, "rol": "ENFERMERO", "correo": "e@x.co", "nombre": "E", "roles_extra": []}
     with pytest.raises(PermisoDenegado):
         srv.eliminar_usuario(enfermero, 3, "z@x.co")
+
+
+def test_permisos_quitados_restan_a_rol_y_extras():
+    from src.seguridad.permisos import permisos_de, permisos_de_usuario
+    base = permisos_de("ENFERMERO")
+    quitar = sorted(base)[0]
+    u = {"rol": "ENFERMERO", "activo": 1, "permisos_quitados": [quitar, "no.existe"],
+         "permisos_extra": [quitar]}
+    efectivos = permisos_de_usuario(u)
+    assert quitar not in efectivos                      # lo quitado gana, incluso sobre un permiso individual
+    assert efectivos == base - {quitar}
+
+
+def test_quitar_permisos_exige_permiso():
+    import pytest
+
+    from src.seguridad.permisos import PermisoDenegado
+    from src.servicios import roles as srv
+    enfermero = {"id": 2, "rol": "ENFERMERO", "correo": "e@x.co", "nombre": "E", "roles_extra": []}
+    with pytest.raises(PermisoDenegado):
+        srv.cambiar_permisos_quitados(enfermero, 3, ["inventario.baja"])
