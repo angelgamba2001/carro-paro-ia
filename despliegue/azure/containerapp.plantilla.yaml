@@ -1,0 +1,89 @@
+# Plantilla de la Container App. La completa desplegar_containerapps.ps1:
+# no editar los __MARCADORES__ ni subir a Git una copia con los valores reales.
+#
+# Una sola replica con cuatro contenedores que comparten localhost:
+#   proxy (nginx, unico expuesto, HTTPS lo pone Azure) -> web (Streamlit) y api (FastAPI)
+#   mysql: solo accesible dentro de la replica, nunca desde internet.
+# Volumenes EmptyDir: si la replica se reinicia o se publica una version nueva,
+# la BD vuelve a los datos de demostracion y el data lake se regenera.
+location: __REGION__
+name: __APP__
+type: Microsoft.App/containerApps
+properties:
+  managedEnvironmentId: __ENV_ID__
+  configuration:
+    activeRevisionsMode: Single
+    ingress:
+      external: true
+      targetPort: 80
+      transport: auto
+      allowInsecure: false
+    registries:
+      - server: __ACR__
+        username: __ACR_USUARIO__
+        passwordSecretRef: acr-password
+    secrets:
+      - {name: acr-password, value: "__ACR_PASSWORD__"}
+      - {name: db-password, value: "__DB_PASSWORD__"}
+      - {name: jwt-secreto, value: "__JWT__"}
+      - {name: clave-cifrado, value: "__FERNET__"}
+  template:
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
+    volumes:
+      - {name: mysql-datos, storageType: EmptyDir}
+      - {name: datalake, storageType: EmptyDir}
+    containers:
+      - name: mysql
+        image: __ACR__/mysql:8.0
+        resources: {cpu: 0.5, memory: 1Gi}
+        env:
+          - {name: MYSQL_ROOT_PASSWORD, secretRef: db-password}
+        volumeMounts:
+          - {volumeName: mysql-datos, mountPath: /var/lib/mysql}
+      - name: web
+        image: __ACR__/carro-paro-ia:__TAG__
+        command: ["sh", "despliegue/azure/arranque.sh", "web"]
+        resources: {cpu: 1.25, memory: 2.5Gi}
+        env:
+          - {name: DB_HOST, value: "127.0.0.1"}
+          - {name: DB_PORT, value: "3306"}
+          - {name: DB_USER, value: root}
+          - {name: DB_PASSWORD, secretRef: db-password}
+          - {name: DB_NAME, value: carro_paro_db}
+          - {name: ENTORNO, value: produccion}
+          - {name: JWT_SECRETO, secretRef: jwt-secreto}
+          - {name: CLAVE_CIFRADO, secretRef: clave-cifrado}
+          - {name: MOTOR_BIGDATA, value: pandas}
+          - {name: AGENTE_PROVEEDOR, value: reglas}
+          - {name: REGISTRO_ABIERTO, value: "true"}
+          - {name: CORREO_MODO, value: archivo}
+          - {name: MS_REDIRECT_URI, value: "https://__FQDN__"}
+          - {name: PYTHONUNBUFFERED, value: "1"}
+        volumeMounts:
+          - {volumeName: datalake, mountPath: /app/data}
+      - name: api
+        image: __ACR__/carro-paro-ia:__TAG__
+        command: ["sh", "despliegue/azure/arranque.sh", "api"]
+        resources: {cpu: 0.5, memory: 1Gi}
+        env:
+          - {name: DB_HOST, value: "127.0.0.1"}
+          - {name: DB_PORT, value: "3306"}
+          - {name: DB_USER, value: root}
+          - {name: DB_PASSWORD, secretRef: db-password}
+          - {name: DB_NAME, value: carro_paro_db}
+          - {name: ENTORNO, value: produccion}
+          - {name: JWT_SECRETO, secretRef: jwt-secreto}
+          - {name: CLAVE_CIFRADO, secretRef: clave-cifrado}
+          - {name: MOTOR_BIGDATA, value: pandas}
+          - {name: AGENTE_PROVEEDOR, value: reglas}
+          - {name: REGISTRO_ABIERTO, value: "true"}
+          - {name: CORREO_MODO, value: archivo}
+          - {name: MS_REDIRECT_URI, value: "https://__FQDN__"}
+          - {name: PYTHONUNBUFFERED, value: "1"}
+        volumeMounts:
+          - {volumeName: datalake, mountPath: /app/data}
+      - name: proxy
+        image: __ACR__/carro-paro-nginx:__TAG__
+        resources: {cpu: 0.25, memory: 0.5Gi}
