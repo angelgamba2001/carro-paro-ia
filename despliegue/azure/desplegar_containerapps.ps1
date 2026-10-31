@@ -195,8 +195,9 @@ if ($appActual -and (($appActual.loc -replace '\s', '').ToLower() -ne $Region.To
     Invoke-Az containerapp delete -n $App -g $Grupo --yes -o none
     $otras = az containerapp list -g $Grupo --query "[?properties.managedEnvironmentId=='$($appActual.env)'].name" -o tsv
     if (-not $otras) {
-        Write-Host "    Eliminando el entorno anterior $envViejo (en segundo plano)."
-        Invoke-Az containerapp env delete -n $envViejo -g $Grupo --yes --no-wait -o none
+        # La cuenta de prueba admite un solo entorno: hay que esperar a que este termine de borrarse
+        Write-Host "    Eliminando el entorno anterior $envViejo (puede tardar varios minutos)..."
+        Invoke-Az containerapp env delete -n $envViejo -g $Grupo --yes -o none
     }
 } else {
     Write-Host "    No hace falta."
@@ -205,6 +206,18 @@ if ($appActual -and (($appActual.loc -replace '\s', '').ToLower() -ne $Region.To
 Write-Host "==> 8/9 Entorno de Container Apps ($Region)" -ForegroundColor Cyan
 $envId = az containerapp env list -g $Grupo --query "[?name=='$Entorno'].id" -o tsv
 if (-not $envId) {
+    # La cuenta de prueba admite UN solo entorno en toda la suscripcion. Si queda otro (por
+    # ejemplo, el de la region anterior terminando de borrarse), se espera hasta 20 minutos.
+    for ($i = 0; $i -lt 40; $i++) {
+        $otros = az containerapp env list --query "[?name!='$Entorno'].name" -o tsv
+        if (-not $otros) { break }
+        if ($i -eq 0) { Write-Host "    Esperando a que se termine de borrar el entorno anterior ($otros)..." }
+        Start-Sleep -Seconds 30
+    }
+    if ($otros) {
+        throw ("La suscripcion solo admite un entorno de Container Apps y aun existe '$otros'. " +
+               "Espera unos minutos (o borralo en el portal) y vuelve a ejecutar el script.")
+    }
     Invoke-Az containerapp env create -n $Entorno -g $Grupo -l $Region -o none
     $envId = az containerapp env list -g $Grupo --query "[?name=='$Entorno'].id" -o tsv
 }
