@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 AJUSTES = {
     "MINUTOS_INACTIVIDAD": ("Expiración de la sesión web por inactividad (minutos)", 1, 480),
     "JWT_MINUTOS_EXPIRACION": ("Expiración del token de la API (minutos)", 1, 480),
+    "MFA_PENDIENTE_MINUTOS": ("Expiración de la pantalla del código de verificación (minutos)", 1, 30),
 }
 _TTL = 10                       # segundos que se reutiliza la lectura de la tabla
 _cache = {"t": 0.0, "v": {}}

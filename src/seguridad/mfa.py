@@ -40,7 +40,9 @@ def pendiente_vencido(desde, ahora=None) -> bool:
     """¿Lleva demasiado esperando la pantalla del código? Pasado MFA_PENDIENTE_MINUTOS hay que volver
     a empezar: un código sin usar no debe quedar abierto indefinidamente en una pantalla olvidada."""
     from datetime import datetime, timedelta
-    return bool(desde) and (ahora or datetime.now()) - desde > timedelta(minutes=config.MFA_PENDIENTE_MINUTOS)
+
+    from src.seguridad import ajustes      # el administrador lo cambia desde Configuración, sin reiniciar
+    return bool(desde) and (ahora or datetime.now()) - desde > timedelta(minutes=ajustes.valor("MFA_PENDIENTE_MINUTOS"))
 
 
 def mfa_obligatorio(rol: str, extras=()) -> bool:
