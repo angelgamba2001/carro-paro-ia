@@ -71,38 +71,21 @@ if (-not $Region) {
     if ($existente) {
         $Region = ($existente -replace '\s', '').ToLower()
         Write-Host "    Ya existe un servidor MySQL en ${Region}: se usa esa region."
-    } else {
-        Write-Host "    Buscando una region donde la suscripcion pueda crear MySQL..."
-        foreach ($r in $RegionesCandidatas) {
-            $ErrorActionPreference = "Continue"
-            $skus = az mysql flexible-server list-skus -l $r -o json 2>$null
-            $ErrorActionPreference = "Stop"
-            $n = 0
-            if ($LASTEXITCODE -eq 0 -and $skus) { $n = @($skus | ConvertFrom-Json).Count }
-            Write-Host ("      {0,-16} {1}" -f $r, $(if ($n -gt 0) { "disponible" } else { "no disponible" }))
-            if ($n -gt 0) { $Region = $r; break }
-        }
-        if (-not $Region) {
-            throw ("Ninguna region de la lista ofrece Azure Database for MySQL a esta suscripcion de prueba. " +
-                   "No se cambio nada en Azure: la app actual sigue funcionando.")
-        }
     }
 }
-if (-not $Entorno) { $Entorno = "cae-carro-paro-$Region" }
-Write-Host "    Region elegida: $Region" -ForegroundColor Green
 
 Write-Host "==> 2/9 Grupo de recursos $Grupo" -ForegroundColor Cyan
 if ((az group exists --name $Grupo) -ne "true") {
-    Invoke-Az group create --name $Grupo --location $Region -o none
+    Invoke-Az group create --name $Grupo --location $(if ($Region) { $Region } else { $RegionesCandidatas[0] }) -o none
 } else {
-    Write-Host "    El grupo ya existe; se reutiliza (los recursos nuevos van en $Region)."
+    Write-Host "    El grupo ya existe; se reutiliza."
 }
 
 Write-Host "==> 3/9 Registro de contenedores (ACR Basic)" -ForegroundColor Cyan
 $acr = az acr list -g $Grupo --query "[0].name" -o tsv
 if (-not $acr) {
     $acr = "carroparo" + (Get-Random -Minimum 10000 -Maximum 99999)
-    Invoke-Az acr create -g $Grupo -n $acr --sku Basic --admin-enabled true -l $Region -o none
+    Invoke-Az acr create -g $Grupo -n $acr --sku Basic --admin-enabled true -l $(if ($Region) { $Region } else { $RegionesCandidatas[0] }) -o none
 }
 $acrServidor = "$acr.azurecr.io"
 if (-not $ServidorBD) { $ServidorBD = "carroparo-mysql-" + ($acr -replace '\D', '') }
@@ -161,24 +144,48 @@ New-Item -ItemType Directory -Force $carpetaSecretos | Out-Null
 ($sec | ConvertTo-Json) | Set-Content -Path $archivoSecretos -Encoding UTF8
 Write-Host "    Copia de seguridad de los secretos: $archivoSecretos (no la borres ni la subas a Git)"
 
-Write-Host "==> 6/9 Base de datos persistente: $ServidorBD ($Region)" -ForegroundColor Cyan
+Write-Host "==> 6/9 Base de datos persistente: $ServidorBD" -ForegroundColor Cyan
 $bdExiste = az mysql flexible-server list -g $Grupo --query "[?name=='$ServidorBD'].name" -o tsv
 if (-not $bdExiste) {
     # Sin servidor no hay datos que proteger: contrasena nueva (nunca reutilizar una que se haya mostrado)
     $sec["db"] = "Cp#" + (New-Hex 16) + "Z9"
     ($sec | ConvertTo-Json) | Set-Content -Path $archivoSecretos -Encoding UTF8
-    Write-Host "    Creando el servidor MySQL (B1ms, 20 GB; 5-10 min). Entra en los servicios gratuitos de la cuenta."
-    # --public-access 0.0.0.0: solo admite conexiones desde servicios de Azure (no desde internet en general)
-    Invoke-Az mysql flexible-server create -g $Grupo -n $ServidorBD -l $Region `
-        --tier Burstable --sku-name Standard_B1ms --storage-size 20 --version 8.0.21 `
-        --admin-user $UsuarioBD --admin-password $sec["db"] --public-access 0.0.0.0 `
-        --database-name carro_paro_db --high-availability Disabled --backup-retention 7 --yes -o none
-} elseif ($dbNueva) {
-    Write-Host "    El servidor ya existe pero no habia contrasena guardada: se le asigna la nueva."
-    Invoke-Az mysql flexible-server update -g $Grupo -n $ServidorBD --admin-password $sec["db"] -o none
+    # La cuenta de prueba no ofrece MySQL en todas las regiones y la unica prueba fiable es intentar
+    # crearlo: en una region bloqueada Azure lo rechaza al instante, sin crear nada.
+    $regiones = $(if ($Region) { @($Region) } else { $RegionesCandidatas })
+    $creado = $false
+    foreach ($r in $regiones) {
+        Write-Host "    Probando $r (si hay capacidad, la creacion tarda 5-10 min)..."
+        $ErrorActionPreference = "Continue"
+        $salida = & az mysql flexible-server create -g $Grupo -n $ServidorBD -l $r `
+            --tier Burstable --sku-name Standard_B1ms --storage-size 20 --version 8.0.21 `
+            --admin-user $UsuarioBD --admin-password $sec["db"] --public-access 0.0.0.0 `
+            --database-name carro_paro_db --high-availability Disabled --backup-retention 7 --yes -o none 2>&1 | Out-String
+        $codigo = $LASTEXITCODE
+        $ErrorActionPreference = "Stop"
+        if ($codigo -eq 0) { $Region = $r; $creado = $true; Write-Host "    Servidor creado en $r." -ForegroundColor Green; break }
+        $salida = $salida -replace [regex]::Escape($sec["db"]), "****"
+        if ($salida -match "No available SKUs|NotAvailableForSubscription|not available|restricted|LocationIsOfferRestricted|not allowed|QuotaExceeded|NoRegisteredProviderFound") {
+            Write-Host "      $r no disponible para esta suscripcion."
+            continue
+        }
+        throw "No se pudo crear el servidor MySQL en ${r}:`n$salida"
+    }
+    if (-not $creado) {
+        throw ("Ninguna region de la lista ofrece Azure Database for MySQL a esta suscripcion de prueba. " +
+               "No se cambio nada mas en Azure: la app actual sigue funcionando.")
+    }
 } else {
-    Write-Host "    El servidor ya existe; se reutiliza con sus datos."
+    $Region = ((az mysql flexible-server show -g $Grupo -n $ServidorBD --query location -o tsv) -replace '\s', '').ToLower()
+    if ($dbNueva) {
+        Write-Host "    El servidor ya existe pero no habia contrasena guardada: se le asigna la nueva."
+        Invoke-Az mysql flexible-server update -g $Grupo -n $ServidorBD --admin-password $sec["db"] -o none
+    } else {
+        Write-Host "    El servidor ya existe ($Region); se reutiliza con sus datos."
+    }
 }
+if (-not $Entorno) { $Entorno = "cae-carro-paro-$Region" }
+Write-Host "    Region de la app y la base de datos: $Region" -ForegroundColor Green
 $dbHost = az mysql flexible-server show -g $Grupo -n $ServidorBD --query fullyQualifiedDomainName -o tsv
 
 Write-Host "==> 7/9 Traslado desde la region anterior (si aplica)" -ForegroundColor Cyan
