@@ -10,12 +10,16 @@
 #     .\despliegue\azure\desplegar_containerapps.ps1
 # Se puede volver a ejecutar para publicar una version nueva (usa el ultimo commit).
 #
-# Region: eastus. En la cuenta de prueba, Brazil South no permite el servidor MySQL, y
-# la app va en la misma region que la base de datos para no sumar latencia a cada consulta.
+# Region: la cuenta de prueba no ofrece MySQL en todas las regiones (Brazil South y East US no).
+# El script elige la primera region de la lista donde Azure si ofrece el servidor, y pone la
+# app en esa misma region para no sumar latencia a cada consulta. Si ya existe un servidor,
+# se reutiliza su region.
 param(
     [string]$Grupo        = "rg-carro-paro",
-    [string]$Region       = "eastus",
-    [string]$Entorno      = "cae-carro-paro-eastus",
+    [string]$Region       = "",            # vacio = la primera de $RegionesCandidatas con MySQL disponible
+    [string[]]$RegionesCandidatas = @("eastus", "eastus2", "southcentralus", "centralus", "westus2",
+                                      "westus3", "canadacentral", "mexicocentral", "northeurope", "westeurope"),
+    [string]$Entorno      = "",            # vacio = cae-carro-paro-<region>
     [string]$App          = "carro-paro-web",
     [string]$ServidorBD   = "",            # vacio = carroparo-mysql-<numero del registro>
     [string]$UsuarioBD    = "carroadmin"
@@ -26,7 +30,13 @@ $env:PYTHONIOENCODING = "utf-8"          # evita errores de az con tildes en los
 
 function Invoke-Az {
     & az @args
-    if ($LASTEXITCODE -ne 0) { throw "Fallo el comando: az $($args -join ' ')" }
+    if ($LASTEXITCODE -ne 0) {
+        # Nunca mostrar secretos en el mensaje: se oculta el valor que sigue a --admin-password
+        $visible = @(); $ocultar = $false
+        foreach ($a in $args) { if ($ocultar) { $visible += "****"; $ocultar = $false } else { $visible += $a }
+                                if ($a -eq "--admin-password") { $ocultar = $true } }
+        throw "Fallo el comando: az $($visible -join ' ')"
+    }
 }
 function Invoke-Nativo {
     $exe, $resto = $args
@@ -55,6 +65,31 @@ $tag = (git rev-parse --short HEAD)
 Write-Host "==> 1/9 Extension de Container Apps y proveedor de MySQL" -ForegroundColor Cyan
 Invoke-Az extension add --name containerapp --upgrade --only-show-errors
 Invoke-Az provider register --namespace Microsoft.DBforMySQL --wait -o none
+
+if (-not $Region) {
+    $existente = az mysql flexible-server list --query "[?starts_with(name, 'carroparo-mysql-')] | [0].location" -o tsv
+    if ($existente) {
+        $Region = ($existente -replace '\s', '').ToLower()
+        Write-Host "    Ya existe un servidor MySQL en ${Region}: se usa esa region."
+    } else {
+        Write-Host "    Buscando una region donde la suscripcion pueda crear MySQL..."
+        foreach ($r in $RegionesCandidatas) {
+            $ErrorActionPreference = "Continue"
+            $skus = az mysql flexible-server list-skus -l $r -o json 2>$null
+            $ErrorActionPreference = "Stop"
+            $n = 0
+            if ($LASTEXITCODE -eq 0 -and $skus) { $n = @($skus | ConvertFrom-Json).Count }
+            Write-Host ("      {0,-16} {1}" -f $r, $(if ($n -gt 0) { "disponible" } else { "no disponible" }))
+            if ($n -gt 0) { $Region = $r; break }
+        }
+        if (-not $Region) {
+            throw ("Ninguna region de la lista ofrece Azure Database for MySQL a esta suscripcion de prueba. " +
+                   "No se cambio nada en Azure: la app actual sigue funcionando.")
+        }
+    }
+}
+if (-not $Entorno) { $Entorno = "cae-carro-paro-$Region" }
+Write-Host "    Region elegida: $Region" -ForegroundColor Green
 
 Write-Host "==> 2/9 Grupo de recursos $Grupo" -ForegroundColor Cyan
 if ((az group exists --name $Grupo) -ne "true") {
@@ -129,6 +164,9 @@ Write-Host "    Copia de seguridad de los secretos: $archivoSecretos (no la borr
 Write-Host "==> 6/9 Base de datos persistente: $ServidorBD ($Region)" -ForegroundColor Cyan
 $bdExiste = az mysql flexible-server list -g $Grupo --query "[?name=='$ServidorBD'].name" -o tsv
 if (-not $bdExiste) {
+    # Sin servidor no hay datos que proteger: contrasena nueva (nunca reutilizar una que se haya mostrado)
+    $sec["db"] = "Cp#" + (New-Hex 16) + "Z9"
+    ($sec | ConvertTo-Json) | Set-Content -Path $archivoSecretos -Encoding UTF8
     Write-Host "    Creando el servidor MySQL (B1ms, 20 GB; 5-10 min). Entra en los servicios gratuitos de la cuenta."
     # --public-access 0.0.0.0: solo admite conexiones desde servicios de Azure (no desde internet en general)
     Invoke-Az mysql flexible-server create -g $Grupo -n $ServidorBD -l $Region `
