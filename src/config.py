@@ -26,7 +26,7 @@ MAX_INTENTOS_LOGIN = _int("MAX_INTENTOS_LOGIN", 5)
 MINUTOS_BLOQUEO = _int("MINUTOS_BLOQUEO", 15)
 MINUTOS_INACTIVIDAD = _int("MINUTOS_INACTIVIDAD", 15)
 JWT_SECRETO = os.getenv("JWT_SECRETO", "")
-JWT_MINUTOS_EXPIRACION = _int("JWT_MINUTOS_EXPIRACION", 30)
+JWT_MINUTOS_EXPIRACION = _int("JWT_MINUTOS_EXPIRACION", 15)
 ENTORNO = os.getenv("ENTORNO", "desarrollo")  # desarrollo | produccion
 
 # Una sola sesión web activa por persona: al entrar desde otro lugar, la anterior se cierra
