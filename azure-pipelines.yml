@@ -1,0 +1,36 @@
+# Pipeline de Azure DevOps: mismas verificaciones que .gitlab-ci.yml.
+trigger:
+  branches:
+    include: [ main ]
+
+pr:
+  branches:
+    include: [ main ]
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.11'
+    displayName: Python 3.11
+
+  - script: pip install -r requirements.txt pytest bandit pip-audit
+    displayName: Instalar dependencias
+
+  - script: python -m pytest tests/test_unitarias.py -q --junitxml=resultados-pruebas.xml
+    displayName: Pruebas unitarias
+
+  - task: PublishTestResults@2
+    condition: succeededOrFailed()
+    inputs:
+      testResultsFiles: resultados-pruebas.xml
+      testRunTitle: Pruebas unitarias SMARTDATA 360
+
+  - script: bandit -r src app api -ll
+    displayName: SAST con Bandit
+
+  - script: pip-audit -r requirements.txt
+    displayName: SCA con pip-audit
+    continueOnError: true
