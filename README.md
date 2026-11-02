@@ -119,7 +119,7 @@ la hace `inicializar_bd.py`).
 ## 4. Pruebas
 
 ```powershell
-python -m pytest -q          # 26 pruebas: unitarias + integración (se omiten si no hay MySQL)
+python -m pytest -q          # 53 pruebas unitarias; las 30 de integración se omiten si no hay MySQL
 python prueba_entrega.py     # demostración por consola de todos los componentes
 ```
 
@@ -421,3 +421,65 @@ procedimiento está en [`movil/README.md`](movil/README.md).
   (`NaN`, `NaT`) no son JSON válido, y `GET /api/alertas` fallaba siempre que una
   alerta no tuviera fecha de atención —es decir, siempre que estuviera pendiente—.
   Ahora se convierten a `null`.
+
+## 16. Despliegue en Azure
+
+La aplicación pública corre en **Azure Container Apps** (grupo de recursos `rg-carro-paro`,
+región West US 2) con HTTPS automático. Tres contenedores comparten una réplica:
+
+| Contenedor | Función |
+|---|---|
+| `web` | Aplicación Streamlit, en `127.0.0.1:8501` |
+| `api` | API FastAPI, en `127.0.0.1:8000` |
+| `proxy` | nginx: enruta `/api/`, `/docs`, `/openapi.json` y `/redoc` a la API y el resto a la web; añade cabeceras de seguridad y HSTS |
+
+Servicios administrados: **Azure Container Registry** (imágenes), **Azure Database for MySQL
+Flexible Server** B1ms (base `carro_paro_db`, TLS obligatorio) y **Azure OpenAI**
+(`gpt-4.1-mini`) para el agente, con respaldo al motor de reglas si falla.
+
+```powershell
+az login
+.\despliegue\azure\desplegar_containerapps.ps1                    # desplegar o actualizar todo (Docker Desktop abierto)
+.\despliegue\azure\activar_llm_azure_openai.ps1                   # activar el agente con LLM
+.\despliegue\azure\activar_llm_azure_openai.ps1 -Desactivar       # volver al motor de reglas
+```
+
+Para ahorrar crédito, apague la aplicación y la base de datos (y prenda primero MySQL):
+
+```powershell
+az containerapp stop -n carro-paro-web -g rg-carro-paro
+az mysql flexible-server stop -g rg-carro-paro -n <servidor-mysql>
+```
+
+- Los secretos (`jwt-secreto`, `clave-cifrado`, `db-password`, `llm-api-key`, `acr-password`)
+  viven en la Container App y nunca en el repositorio.
+- Tras actualizar el código hay que ejecutar `python scripts/migrar_seguridad.py` para crear
+  las tablas nuevas (por ejemplo `usuario_permiso_quitado`).
+- Los tiempos de sesión web, token de la API y pantalla del segundo factor se cambian desde
+  **Auditoría y seguridad → Configuración**, sin tocar el código.
+
+## 17. Flujo de trabajo con ramas e integración continua
+
+`main` solo recibe cambios que ya pasaron revisión. Cada cambio nace en una rama propia, se
+abre un *Pull Request* (en GitLab, *Merge Request*) y otra persona del equipo lo revisa.
+
+| Prefijo de rama | Uso | Ejemplo |
+|---|---|---|
+| `feature/` | Funcionalidad nueva ligada a una historia de usuario | `feature/HU8-aviso-ia-agente` |
+| `fix/` | Corrección de un defecto o hallazgo de seguridad | `fix/cache-control-nginx` |
+| `docs/` | Cambios de documentación | `docs/readme-azure` |
+
+```powershell
+git switch main; git pull
+git switch -c docs/readme-azure          # una rama por cambio
+git add README.md
+git commit -m "docs(readme): despliegue en Azure y flujo de ramas"
+git push -u origin docs/readme-azure     # y también: git push gitlab docs/readme-azure
+```
+
+Los mensajes de commit siguen el formato `tipo(ámbito): descripción`
+(`feat`, `fix`, `docs`, `test`, `chore`).
+
+El pipeline de [`.gitlab-ci.yml`](.gitlab-ci.yml) tiene tres etapas: `build` (instala las
+dependencias), `test` (pruebas unitarias, Bandit y pip-audit) y `deploy` (solo en `main`).
+[`azure-pipelines.yml`](azure-pipelines.yml) ejecuta las mismas verificaciones en Azure DevOps.
