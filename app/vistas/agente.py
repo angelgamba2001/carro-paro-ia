@@ -27,6 +27,9 @@ def mostrar(usuario: dict):
                + (" (motor de reglas sin LLM; configure AGENTE_PROVEEDOR=llm en el .env para usar un modelo "
                   "de lenguaje)" if agente.proveedor.nombre == "reglas" else
                   " · si el modelo no responde, el agente usa el motor de reglas"))
+    st.info("**Aviso:** las respuestas de este asistente las genera una inteligencia artificial y pueden "
+            "contener errores. Verifique siempre la información en el inventario antes de tomar una decisión "
+            "sobre un carro de paro.", icon="⚠️")
 
     izq, der = st.columns([2.2, 1])
     with der:
