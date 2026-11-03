@@ -101,11 +101,17 @@ def mostrar(usuario: dict):
 
 
 def _entrada_voz() -> str | None:
-    """Micrófono opcional: solo aparece si están instaladas faster-whisper y edge-tts."""
-    from src.agente.voz import voz_disponible
-    if not voz_disponible():
+    """Micrófono opcional: solo funciona si están instaladas faster-whisper y edge-tts."""
+    from src.agente.voz import faltantes
+    pendientes = faltantes()
+    if pendientes:
+        # Antes el micrófono desaparecía sin decir nada y parecía un fallo de la aplicación.
+        st.caption("La entrada por voz no está disponible: falta instalar " + ", ".join(pendientes) +
+                   " (pip install -r requirements-voz.txt).")
         return None
-    audio = st.audio_input("O hable con el agente")
+    audio = st.audio_input("O hable con el agente", sample_rate=16000,
+                           help="El navegador pedirá permiso para usar el micrófono. Funciona solo con "
+                                "HTTPS o en localhost.")
     if not audio:
         return None
     import hashlib
@@ -117,7 +123,7 @@ def _entrada_voz() -> str | None:
         return None
     st.session_state["ultimo_audio"] = huella
     from src.agente.voz import transcribir
-    with st.spinner("Transcribiendo audio..."):
+    with st.spinner("Transcribiendo audio... (la primera vez carga el modelo y tarda más)"):
         try:
             texto = transcribir(audio.getvalue())
         except Exception as e:
@@ -125,7 +131,16 @@ def _entrada_voz() -> str | None:
             # sin rastro en los registros era imposible saber si falló la descarga del
             # modelo, la decodificación del audio o la memoria del contenedor.
             log.exception("Falló la transcripción del audio")
-            st.error(f"No se pudo transcribir el audio — {type(e).__name__}: {e}")
+            # Si el modelo no está en la imagen y no hay salida a internet, el fallo es de descarga.
+            descarga = any(p in f"{type(e).__name__} {e}".lower()
+                           for p in ("huggingface", "connection", "offline", "cannot find", "timeout", "ssl"))
+            if descarga:
+                st.error("No se pudo cargar el modelo de voz: no se descargó. Intente de nuevo en unos minutos "
+                         "o pida al administrador que vuelva a construir la imagen con el modelo incluido.")
+            else:
+                st.error(f"No se pudo transcribir el audio — {type(e).__name__}: {e}")
+            # Se permite volver a intentar la misma grabación tras corregir el problema.
+            st.session_state.pop("ultimo_audio", None)
             return None
     if not texto:
         st.warning("No se entendió el audio; intente de nuevo.")

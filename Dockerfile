@@ -12,6 +12,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Voz del agente, en capa propia: tocarla no obliga a reinstalar todo lo anterior.
 COPY requirements-voz.txt .
 RUN pip install --no-cache-dir -r requirements-voz.txt
+# El modelo de Whisper se descarga al construir la imagen, no la primera vez que alguien usa el
+# micrófono: en Azure Container Apps esa descarga en caliente fallaba o agotaba la espera.
+ENV WHISPER_DIR=/opt/whisper
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8', download_root='/opt/whisper')" \
+    || echo "AVISO: no se pudo precargar el modelo de voz; se descargará al usar el micrófono"
 # Lectura OCR. torch desde el índice de CPU de PyTorch: la rueda de PyPI para
 # Linux trae CUDA (>2 GB) y aquí no hay GPU que la aproveche.
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \

@@ -7,6 +7,7 @@ al servicio de voz de Microsoft; para voz 100 % local se puede reemplazar por py
 import asyncio
 import importlib.util
 import io
+import os
 import re
 import wave
 from functools import lru_cache
@@ -15,18 +16,27 @@ from math import gcd
 import numpy as np
 
 VOZ = "es-CO-SalomeNeural"      # alternativa masculina: es-CO-GonzaloNeural
-MODELO_WHISPER = "small"        # "base" es más liviano; "medium" más preciso
+MODELO_WHISPER = os.environ.get("MODELO_WHISPER", "small")   # "base" es más liviano; "medium" más preciso
+# Carpeta del modelo ya descargado. El Dockerfile lo deja en /opt/whisper al construir la imagen,
+# de modo que el micrófono no depende de descargar ~460 MB la primera vez que alguien lo usa
+# (en Azure Container Apps esa descarga fallaba o tardaba tanto que parecía un error).
+DIR_MODELOS = os.environ.get("WHISPER_DIR") or None
 FRECUENCIA_WHISPER = 16000      # Whisper trabaja siempre a 16 kHz mono
 
 
+def faltantes() -> list[str]:
+    """Paquetes de voz que no están instalados (vacío si todo está disponible)."""
+    return [m for m in ("faster_whisper", "edge_tts") if not importlib.util.find_spec(m)]
+
+
 def voz_disponible() -> bool:
-    return all(importlib.util.find_spec(m) for m in ("faster_whisper", "edge_tts"))
+    return not faltantes()
 
 
 @lru_cache(maxsize=1)
 def _whisper():
     from faster_whisper import WhisperModel
-    return WhisperModel(MODELO_WHISPER, device="cpu", compute_type="int8")
+    return WhisperModel(MODELO_WHISPER, device="cpu", compute_type="int8", download_root=DIR_MODELOS)
 
 
 def _wav_a_muestras(audio_bytes: bytes) -> np.ndarray:
