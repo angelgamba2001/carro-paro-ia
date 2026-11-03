@@ -1,21 +1,53 @@
+# Pipeline de integración continua: build -> test -> deploy.
+# El despliegue a Azure sigue siendo manual (despliegue/azure/desplegar_containerapps.ps1);
+# la etapa deploy solo corre en main y deja constancia de la versión desplegable.
 stages:
   - build
   - test
   - deploy
 
+default:
+  image: python:3.11-slim
+  cache:
+    key: pip-$CI_COMMIT_REF_SLUG
+    paths: [.cache/pip]
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
 build-job:
   stage: build
   script:
-    - echo "Preparando artefactos..."
+    - echo "Instalando dependencias..."
+    - pip install -r requirements.txt pytest bandit pip-audit
+    - python -m compileall -q src app api scripts
+  artifacts:
+    expire_in: 1 hour
+    paths: [.cache/pip]
 
 test-job:
   stage: test
   script:
-    - echo "Ejecutando pruebas de integridad..."
+    - pip install -r requirements.txt pytest
+    - python -m pytest tests/test_unitarias.py -q
+
+sast-job:
+  stage: test
+  script:
+    - pip install bandit
+    - bandit -r src app api -ll
+
+sca-job:
+  stage: test
+  allow_failure: true   # un aviso nuevo en una dependencia no debe bloquear el equipo; se revisa
+  script:
+    - pip install pip-audit
+    - pip-audit -r requirements.txt
 
 deploy-job:
   stage: deploy
   script:
-    - echo "Despliegue exitoso en produccion"
+    - echo "Version $CI_COMMIT_SHORT_SHA lista para desplegar con despliegue/azure/desplegar_containerapps.ps1"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
