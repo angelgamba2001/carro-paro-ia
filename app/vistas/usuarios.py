@@ -7,6 +7,22 @@ from src.servicios import roles as srv_roles
 from src.servicios import usuarios as srv
 
 
+@st.dialog("Confirmar eliminación")
+def _confirmar_eliminar(usuario: dict, uid: int, correo: str):
+    """Recuadro de confirmación final: nada se borra hasta pulsar «Sí, eliminar»."""
+    st.warning(f"¿Está seguro de eliminar definitivamente la cuenta **{correo}**?")
+    st.caption("Esta acción no se puede deshacer. Si la cuenta tiene historial, el sistema no la "
+               "elimina y habrá que desactivarla.")
+    confirmar, cancelar = st.columns(2)
+    if confirmar.button("Sí, eliminar", type="primary", width="stretch"):
+        # El clic en este botón es la confirmación; el servicio sigue exigiendo el correo exacto.
+        accion(srv.eliminar_usuario, usuario, uid, correo, exito=f"Cuenta {correo} eliminada.")
+        if "mensaje_exito" in st.session_state:
+            st.rerun()
+    if cancelar.button("Cancelar", width="stretch"):
+        st.rerun()
+
+
 def _roles_personalizados(usuario: dict):
     """Crear roles con los permisos que se elijan, cambiarlos o eliminarlos."""
     try:
@@ -165,17 +181,10 @@ def mostrar(usuario: dict):
         if c2.button(etiqueta):
             accion(srv.cambiar_estado, usuario, uid, not bool(fila["activo"]), exito=f"Cuenta: {etiqueta.lower()}da.")
             st.rerun()
-        with st.expander("Eliminar cuenta"):
-            st.caption("Solo se pueden eliminar cuentas sin historial (por ejemplo, creadas por error). "
-                       "Si ya registró movimientos o alertas, desactívela. Esta acción no se puede deshacer.")
-            with st.form(f"eliminar_{uid}"):
-                escrito = st.text_input("Escriba el correo de la cuenta para confirmar",
-                                        placeholder=str(fila["correo"]))
-                if st.form_submit_button("Eliminar cuenta definitivamente"):
-                    accion(srv.eliminar_usuario, usuario, uid, escrito,
-                           exito=f"Cuenta {fila['correo']} eliminada.")
-                    if "mensaje_exito" in st.session_state:
-                        st.rerun()
+        st.caption("Solo se pueden eliminar cuentas sin historial (por ejemplo, creadas por error). "
+                   "Si ya registró movimientos o alertas, desactívela.")
+        if st.button("Eliminar cuenta…", key=f"pedir_eliminar_{uid}"):
+            _confirmar_eliminar(usuario, uid, str(fila["correo"]))
         with st.form("reset_pw"):
             temporal = st.text_input("Nueva contraseña temporal", type="password")
             if st.form_submit_button("Restablecer contraseña"):
