@@ -64,7 +64,10 @@ $tag = (git rev-parse --short HEAD)
 
 Write-Host "==> 1/9 Extension de Container Apps y proveedor de MySQL" -ForegroundColor Cyan
 Invoke-Az extension add --name containerapp --upgrade --only-show-errors
-Invoke-Az provider register --namespace Microsoft.DBforMySQL --wait -o none
+# Registrar el proveedor exige permisos a nivel de suscripcion: solo se hace si aun no esta registrado
+if ((az provider show --namespace Microsoft.DBforMySQL --query registrationState -o tsv) -ne "Registered") {
+    Invoke-Az provider register --namespace Microsoft.DBforMySQL --wait -o none
+}
 
 if (-not $Region) {
     $existente = az mysql flexible-server list --query "[?starts_with(name, 'carroparo-mysql-')] | [0].location" -o tsv
